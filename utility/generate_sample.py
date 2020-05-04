@@ -56,7 +56,7 @@ def generate_sample(filename, batch_size: int = 14, predict: int = 50, samples: 
         if idx + (samples + predict) > total_data-1:
             idx = total_data - (samples + predict)
 
-        if -1 < start_from < total_data - (samples + predict):
+        if -1 < start_from <= total_data - (samples + predict):
             idx = start_from
 
         T[jdx, :] = range(idx, idx + samples)

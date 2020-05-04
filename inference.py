@@ -6,10 +6,50 @@ from utility.generate_sample import generate_sample
 
 import numpy as np
 # noinspection PyUnresolvedReferences
-import seaborn as sns
-
 import tensorflow as tf
-from tensorflow.contrib import rnn
+tf.compat.v1.disable_eager_execution()
+
+import math
+import argparse
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+
+
+
+_DISCRIPTION = '''
+The file dR15Devs has following devices:\n
+idx    Device\n
+00 -> 'Dev#11'\n
+01 -> 'Dev#12'\n
+02 -> 'Dev#14'\n
+03 -> 'Dev#24'\n
+04 -> 'Dev#25'\n
+05 -> 'Dev#26'\n
+06 -> 'Dev#29'\n
+07 -> 'Dev#32'\n
+08 -> 'Dev#33'\n
+09 -> 'Dev#35'\n
+10 -> 'Dev#36'\n
+11 -> 'Dev#37'\n
+12 -> 'Dev#38'\n
+13 -> 'Dev#8'\n
+14 -> 'Dev#9'\n
+'''
+parser = argparse.ArgumentParser(
+    description='dR Transistor Degradation predicion Based on Stacked LSTM Approch.')
+parser.add_argument('--test-dev', type=int, default=6,
+                    help="Device test ID. {}".format(_DISCRIPTION))
+
+args = parser.parse_args()
+
+if not(-1 < args.test_dev < 15):
+    print(
+        "test-dev should be a number in [0,14]. Please run thte program with --help for more information.")
+    raise ValueError
 
 
 
@@ -39,13 +79,7 @@ Inspired by
 
 
 # Parameters
-data_file =  "./utility/RoIFor5Devs.mat"
-batch_size = 4  # because we have four devices to learn, and one device to test
-learning_rate = 0.003
-training_iters = 1000
-training_iter_step_down_every = 250000
-display_step = 100
-updating_plot = 10
+data_file = "./utility/dR15Devs.mat"
 
 # Network Parameters
 n_input = 1  # Delta{R}
@@ -53,45 +87,49 @@ n_steps = 20  # time steps
 n_hidden = 32  # Num of features
 n_outputs = 104  # output is a series of Delta{R}+
 n_layers = 4  # number of stacked LSTM layers
-save_movie = False
 save_res_as_file = True
-reach_to_test_error = 5e-10
+fig_output_dir = './pred_plots/'
 
+test_device = [args.test_dev]
+_, _, _, _, _, dev_name = generate_sample(
+    filename=data_file, batch_size=1, samples=n_steps, predict=n_outputs, test=True, test_set=test_device)
 
 '''
     Computation graph
 '''
 
-with tf.name_scope("INPUTs"):
+with tf.compat.v1.name_scope("INPUTs"):
     # tf Graph input
-    lr = tf.placeholder(tf.float32, [])
-    x = tf.placeholder(tf.float32, [None, n_steps, n_input])
-    y = tf.placeholder(tf.float32, [None, n_outputs])
+    lr = tf.compat.v1.placeholder(tf.float32, [])
+    x = tf.compat.v1.placeholder(tf.float32, [None, n_steps, n_input])
+    y = tf.compat.v1.placeholder(tf.float32, [None, n_outputs])
 
 # Define weights
 weights = {
-    'out': tf.Variable(tf.truncated_normal([n_hidden, n_outputs], stddev=1.0))
+    'out': tf.Variable(tf.random.truncated_normal([n_hidden, n_outputs], stddev=1.0))
 }
 
 biases = {
-    'out': tf.Variable(tf.truncated_normal([n_outputs], stddev=0.1))
+    'out': tf.Variable(tf.random.truncated_normal([n_outputs], stddev=0.1))
 }
 
 # Define the GRU cells
-#with tf.name_scope("GRU_CELL"):
+# with tf.name_scope("GRU_CELL"):
 #    gru_cells = [rnn.GRUCell(n_hidden) for _ in range(n_layers)]
-#with tf.name_scope("GRU_NETWORK"):
+# with tf.name_scope("GRU_NETWORK"):
 #    stacked_lstm = rnn.MultiRNNCell(gru_cells)
 
 # Define the LSTM cells
-with tf.name_scope("LSTM_CELL"):
-    lstm_cells = [rnn.LSTMCell(n_hidden, forget_bias=1.) for _ in range(n_layers)]
-#with tf.name_scope("LSTM"):
-    stacked_lstm = rnn.MultiRNNCell(lstm_cells)
+with tf.compat.v1.name_scope("LSTM_CELL"):
+    lstm_cells = [tf.compat.v1.nn.rnn_cell.LSTMCell(
+        n_hidden, forget_bias=1.) for _ in range(n_layers)]
+# with tf.name_scope("LSTM"):
+    stacked_lstm = tf.compat.v1.nn.rnn_cell.MultiRNNCell(lstm_cells)
 
-with tf.name_scope("OUTPUTs"):
-    outputs, states = tf.nn.dynamic_rnn(stacked_lstm, inputs=x, dtype=tf.float32, time_major=False)
-    h = tf.transpose(outputs, [1, 0, 2])
+with tf.compat.v1.name_scope("OUTPUTs"):
+    outputs, states = tf.compat.v1.nn.dynamic_rnn(
+        stacked_lstm, inputs=x, dtype=tf.float32, time_major=False)
+    h = tf.transpose(a=outputs, perm=[1, 0, 2])
     pred = tf.nn.bias_add(tf.matmul(h[-1], weights['out']), biases['out'])
 
 
@@ -107,35 +145,43 @@ We don't need this part for inference
 #optimizer = tf.train.AdamOptimizer(learning_rate=lr).minimize(loss)
 
 # Initializing the variables
-init = tf.global_variables_initializer()
+init = tf.compat.v1.global_variables_initializer()
 
-merged = tf.summary.merge_all()
+merged = tf.compat.v1.summary.merge_all()
 
 load_model = True
-model_file_name = './inference_models/model_dev2.ckpt'
-saver = tf.train.Saver()
+model_file_name = './inference_models/model_' + dev_name + '.ckpt'
 
-test_device = [1] # 0 -> dev36, 1 -> dev12, 2 -> dev38, 3 -> dev11, 4 -> dev9
+saver = tf.compat.v1.train.Saver()
 TX2_Board_Power = False
 
-config = tf.ConfigProto(
-        device_count = {'GPU': 1}
+config = tf.compat.v1.ConfigProto(
+        device_count={'GPU': 0}
     )
+
+def calc_error(output, target, index):
+    return abs((output[index] - target[index])) / target[index]
+
+def find_idx(arr):
+    if not arr.any():
+        return -1
+    return np.argmax(arr)
 
 if __name__ == "__main__":
 
-    with tf.Session() as sess:
+    with tf.compat.v1.Session(config=config) as sess:
 
         if load_model:
             # Restore variables from disk.
             saver.restore(sess, model_file_name)
             print('Model restored.')
-
-        sess.run(init)
+        else:
+            sess.run(init)
+        
         from datetime import datetime
 
 
-        _, _, _, _, l = generate_sample(filename=data_file, batch_size=1, samples=n_steps, predict=n_outputs, test=True, test_set=test_device)
+        _, _, _, _, l, dev_name = generate_sample(filename=data_file, batch_size=1, samples=n_steps, predict=n_outputs, test=True, test_set=test_device)
         total_dev_len = l[0]
         how_many_seg = int(total_dev_len / (n_steps + n_outputs))
 
@@ -156,31 +202,108 @@ if __name__ == "__main__":
             print('sending {!r}'.format(message))
             sock.sendall(message)
 
+        out = np.array([])
+        tr = np.array([])
+        pred_lst = np.array([])
+        out_lst = np.array([])
+
         for i in range(how_many_seg):
-                tstart = datetime.now()
-                t, y, next_t, expected_y,_ = generate_sample(filename=data_file,
-                                                           batch_size=1, samples=n_steps, predict=n_outputs,
-                                                           start_from=i * (n_steps + n_outputs), test=True, test_set=test_device)
-                test_input = y.reshape((1, n_steps, n_input))
-                prediction = sess.run(pred, feed_dict={x: test_input})
-                tend = datetime.now()
+            _, y, next_t, expected_y,_, _ = generate_sample(filename=data_file,
+                                                       batch_size=1, samples=n_steps, predict=n_outputs,
+                                                       start_from=i * (n_steps + n_outputs), test=True, test_set=test_device)
+            test_input = y.reshape((1, n_steps, n_input))
+            tstart = datetime.now()
+            prediction = sess.run(pred, feed_dict={x: test_input})
+            tend = datetime.now()
                 
-                if TX2_Board_Power:
-                    if not sent_before:
-                        message = b'STOP\n'
-                        print('sending {!r}'.format(message))
-                        sock.sendall(message)
-                        sent_before = True
+            if TX2_Board_Power:
+                if not sent_before:
+                    message = b'STOP\n'
+                    print('sending {!r}'.format(message))
+                    sock.sendall(message)
+                    sent_before = True
 
-                # remove the batch size dimensions
-                t = t.squeeze()
-                y = y.squeeze()
-                delta = tend - tstart
-                avg_Time += (delta.total_seconds())*1000
-                print('Next loop:'+'{}'.format(int(i*100/(how_many_seg-1))), end='\r')
+            # remove the batch size dimensions
+            delta = tend - tstart
+                
+            pred_lst = np.hstack((pred_lst, y[0]))  # Input Seq
+            pred_lst = np.hstack((pred_lst, prediction[0]))  # Prediction
+            
+            out_lst = np.hstack((out_lst, y[0]))
+            out_lst = np.hstack((out_lst, expected_y[0]))
+            
+            out = np.hstack((out, prediction[0]))
+            tr = np.hstack((tr, expected_y[0]))
 
-        
-        print('Avg elapsed time for predicting one minute: '+ '{}'.format(int(avg_Time/how_many_seg)))
+            avg_Time += (delta.total_seconds())*1000
+            print('Next loop: {:3.2f}'.format(int(i*100/(how_many_seg-1))), end='\r')
+
+
+        pred_lst_5p = np.array([])
+        out_lst_5p = np.array([])
+
+        _, y_p, _, expected_y_p,_, _ = generate_sample(filename=data_file,
+            batch_size=1, samples=n_steps, predict=n_outputs,
+            start_from=total_dev_len - (n_steps + n_outputs), test=True, test_set=test_device)
+
+
+        test_input_5p = y_p.reshape((1, n_steps, n_input))
+        tstart = datetime.now()
+        prediction_5p = sess.run(pred, feed_dict={x: test_input_5p})
+
+        pred_lst_5p = np.hstack((pred_lst_5p, y_p[0]))  # Input Seq
+        pred_lst_5p = np.hstack((pred_lst_5p, prediction_5p[0]))  # Prediction
+        out_lst_5p = np.hstack((out_lst_5p, y_p[0]))
+        out_lst_5p = np.hstack((out_lst_5p, expected_y_p[0]))
+
+
+        idx = find_idx(expected_y_p[0] >= 0.044)
+        if idx != -1:
+            error = calc_error(prediction_5p[0], expected_y_p[0], idx)
+            error *= 100
+            print('target = {:0.6f} | prediction = {:0.6f} | error: {:3.4f}%'.format(expected_y_p[0][idx], prediction_5p[0][idx], error))
+        else:
+            raise ValueError  
+
+        if save_res_as_file:
+            #pred_nump = np.array(pred_lst)
+            np.savetxt('./prediction_output/res_' +
+                dev_name + '.txt', pred_lst, fmt="%f", newline='\r\n')
+            
+            plt.figure(figsize=(8.5, 2.85))
+            plt.plot(range(len(pred_lst)), pred_lst, 'b',
+                 label='{} - Predicted'.format(dev_name.replace('_', '#')))
+            plt.plot(range(len(out_lst)), out_lst, 'r', alpha=0.6,
+                 label='{} - Measured'.format(dev_name.replace('_', '#')))
+
+            plt.legend(loc='upper left')
+            plt.xlabel('Num. of Samples')
+            plt.ylabel('ΔR')
+            plt.savefig('{}/device_{}_full.png'.format(fig_output_dir, dev_name))
+            
+            plt.clf()
+            plt.cla()
+            plt.close()
+            
+            plt.figure(figsize=(8.5, 2.85))
+            plt.plot(range(len(pred_lst_5p)), pred_lst_5p, 'b',
+                 label='{} - Predicted'.format(dev_name.replace('_', '#')))
+            plt.plot(range(len(out_lst_5p)), out_lst_5p, 'r', alpha=0.6,
+                 label='{} - Measured'.format(dev_name.replace('_', '#')))
+
+            plt.legend(loc='upper left')
+            plt.xlabel('Num. of Samples')
+            plt.ylabel('ΔR')
+            plt.savefig('{}/device_{}_tail.png'.format(fig_output_dir, dev_name))
+                
+
+        mse = ((out - tr)**2).mean(axis=0)
+        print("Log(MSE) of {} is {:2.4f}".format(dev_name, math.log10(mse)))
+
+        mse_5p = ((expected_y_p[0] - prediction_5p[0])**2).mean(axis=0)
+        print("Log(MSE) of {} at hot zone is {:2.4f}".format(dev_name, math.log10(mse_5p)))
+
+        print('Avg elapsed time for predicting one minute:  {:2.4} mS'.format(avg_Time/how_many_seg))
         
         if TX2_Board_Power:
             print('closing socket')

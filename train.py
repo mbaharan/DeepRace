@@ -191,7 +191,7 @@ def total_mse():
         prediction = sess.run(pred, feed_dict={x: test_input})
         # remove the batch size dimensions
         pred_lst = np.hstack((pred_lst, prediction[0]))  # Prediction
-        target_lst = np.hstack((target_lst, expected_y[0]))  # Prediction
+        target_lst = np.hstack((target_lst, expected_y[0]))  # Expected
     #individual_losses = tf.reduce_sum(input_tensor=tf.math.squared_difference(pred_lst, target_lst), axis=0)
     # tf.reduce_mean(input_tensor=individual_losses)
     loss = ((pred_lst - target_lst)**2).mean(axis=0)
