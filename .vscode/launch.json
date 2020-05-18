@@ -5,6 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Inference",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/inference.py",
+            "console": "integratedTerminal",
+            "args": ["--rul-time", "77", "83"]
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
