@@ -318,13 +318,14 @@ if __name__ == "__main__":
             avg_Time/how_many_seg))
 
         if len(args.rul_time) > 0:
+            print('+'*100)
+            samplePerMin = mat['SamplePerMin'][0, args.test_dev][0]
+            degAt = round(thr_idx/samplePerMin[0])
+            print("{} is degregaded at {} minutes.".format(dev_name, degAt))
             print('-'*100)
             for rul_time in args.rul_time:
                 print("Calculating the RUL at {} considering threshols={}.".format(
                     rul_time, args.threshold))
-                samplePerMin = mat['SamplePerMin'][0, args.test_dev][0]
-                degAt = round(thr_idx/samplePerMin[0])
-                print("{} is degregaded at {} minutes.".format(dev_name, degAt))
                 if rul_time > degAt:
                     raise ValueError(
                         "Given time for RUL is bigger than {}.".format(degAt))
