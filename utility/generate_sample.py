@@ -18,7 +18,7 @@ Authors: Reza Baharani - Transformative Computer Systems Architecture Research (
 
 
 def generate_sample(filename, batch_size: int = 14, predict: int = 50, samples: int = 100,
-                    test_set: list = [0], start_from: int = -1, test: bool = False, total_dev=15):
+                    test_set: list = [0], start_from: int = -1, test: bool = False, total_dev=10):
     """
     Generates data samples.
 
@@ -83,7 +83,7 @@ if __name__ == '__main__':
     predict = 50
 
     t, y, t_next, y_next, lengths = generate_sample(
-        filename="./utility/dR15Devs.mat", batch_size=1, test=False)
+        filename="./utility/dR10Devs.mat", batch_size=1, test=False)
 
     n_tests = t.shape[0]
     for i in range(0, n_tests):

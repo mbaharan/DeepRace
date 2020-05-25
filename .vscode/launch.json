@@ -10,7 +10,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/inference.py",
             "console": "integratedTerminal",
-            "args": ["--rul-time", "77", "83"]
+            "args": ["--rul-time", "77", "83", "--test-dev", "13"]
         },
         {
             "name": "Python: Current File",

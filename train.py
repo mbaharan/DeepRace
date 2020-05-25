@@ -20,21 +20,16 @@ matplotlib.use("Agg")
 _DISCRIPTION = '''
 The file dR15Devs has following devices:\n
 idx    Device\n
-00 -> 'Dev#11'\n
-01 -> 'Dev#12'\n
-02 -> 'Dev#14'\n
-03 -> 'Dev#24'\n
-04 -> 'Dev#25'\n
-05 -> 'Dev#26'\n
-06 -> 'Dev#29'\n
-07 -> 'Dev#32'\n
-08 -> 'Dev#33'\n
-09 -> 'Dev#35'\n
-10 -> 'Dev#36'\n
-11 -> 'Dev#37'\n
-12 -> 'Dev#38'\n
-13 -> 'Dev#8'\n
-14 -> 'Dev#9'\n
+00 -> 'Dev#8'\n
+01 -> 'Dev#9'\n
+02 -> 'Dev#11'\n
+03 -> 'Dev#12'\n
+04 -> 'Dev#24'\n
+05 -> 'Dev#29'\n
+06 -> 'Dev#32'\n
+07 -> 'Dev#35'\n
+08 -> 'Dev#36'\n
+09 -> 'Dev#38'\n
 '''
 parser = argparse.ArgumentParser(
     description='dR Transistor Degradation predicion Based on Stacked LSTM Approch.')
@@ -77,7 +72,7 @@ Inspired by
 
 
 # Parameters
-data_file = "./utility/dR15Devs.mat"
+data_file = "./utility/dR10Devs.mat"
 batch_size = 14  # because we have four devices to learn, and one device to test
 learning_rate = 0.003
 training_iters = 1000
@@ -375,7 +370,7 @@ if __name__ == "__main__":
             mywriter = animation.FFMpegWriter(fps=24, codec='libx264',
                                               extra_args=['-pix_fmt', 'yuv420p', '-profile:v', 'high', '-tune', 'animation',
                                                           '-crf', '18'])
-            ani.save("./deltaR_video_"+dev_name+".mp4", writer=mywriter)
+            ani.save("./movies/deltaR_video_"+dev_name+".mp4", writer=mywriter)
         else:
             plt.show()
 

@@ -320,7 +320,7 @@ if __name__ == "__main__":
         if len(args.rul_time) > 0:
             print('+'*100)
             samplePerMin = mat['SamplePerMin'][0, args.test_dev][0]
-            degAt = round(thr_idx/samplePerMin[0])
+            degAt = int(thr_idx/samplePerMin[0])
             print("{} is degregaded at {} minutes.".format(dev_name, degAt))
             print('-'*100)
             for rul_time in args.rul_time:
@@ -329,7 +329,7 @@ if __name__ == "__main__":
                 if rul_time > degAt:
                     raise ValueError(
                         "Given time for RUL is bigger than {}.".format(degAt))
-                rul_time_idx = round(rul_time * samplePerMin[0])
+                rul_time_idx = int(rul_time * samplePerMin[0])
                 _, y_p_rul, _, expected_y_p_rul, _, _ = generate_sample(filename=data_file,
                                                                         batch_size=1, samples=n_steps, predict=n_outputs,
                                                                         start_from=rul_time_idx - (n_steps + n_outputs), test=True, test_set=test_device)
@@ -342,13 +342,13 @@ if __name__ == "__main__":
                 RUL_hat = 100 * \
                     abs(prediction_5p[0][-1] - expected_y_p_rul[0]
                         [-1])/prediction_5p[0][-1]
-                print("RUL at {} is {:3.3f}".format(rul_time, RUL))
-                print("Estimated RUL at {} is {:3.3f}".format(
+                print("RUL at {} is {:3.1f}".format(rul_time, RUL))
+                print("Estimated RUL at {} is {:3.1f}".format(
                     rul_time, RUL_hat))
                 RA = 100*(1-(abs(RUL-RUL_hat)/RUL))
                 Err = RUL - RUL_hat
-                print("Error at {} is {:3.3f}".format(rul_time, Err))
-                print("RA at {} is {:3.3f}".format(rul_time, RA))
+                print("Error at {} is {:3.1f}".format(rul_time, Err))
+                print("RA at {} is {:3.1f}".format(rul_time, RA))
                 print('-'*100)
 
         if TX2_Board_Power:
