@@ -18,18 +18,19 @@ matplotlib.use("Agg")
 
 
 _DISCRIPTION = '''
-The file dR15Devs has following devices:\n
+The file dR11Devs has following devices:\n
 idx    Device\n
 00 -> 'Dev#8'\n
 01 -> 'Dev#9'\n
 02 -> 'Dev#11'\n
 03 -> 'Dev#12'\n
-04 -> 'Dev#24'\n
-05 -> 'Dev#29'\n
-06 -> 'Dev#32'\n
-07 -> 'Dev#35'\n
-08 -> 'Dev#36'\n
-09 -> 'Dev#38'\n
+04 -> 'Dev#14'\n
+05 -> 'Dev#24'\n
+06 -> 'Dev#29'\n
+07 -> 'Dev#32'\n
+08 -> 'Dev#35'\n
+09 -> 'Dev#36'\n
+10 -> 'Dev#38'\n
 '''
 parser = argparse.ArgumentParser(
     description='dR Transistor Degradation predicion Based on Stacked LSTM Approch.')
@@ -38,9 +39,9 @@ parser.add_argument('--test-dev', type=int, default=0,
 
 args = parser.parse_args()
 
-if not(-1 < args.test_dev < 15):
+if not(-1 < args.test_dev < 11):
     print(
-        "test-dev should be a number in [0,14]. Please run thte program with --help for more information.")
+        "test-dev should be a number in [0,11]. Please run thte program with --help for more information.")
     raise ValueError
 
 # noinspection PyUnresolvedReferences
@@ -72,8 +73,8 @@ Inspired by
 
 
 # Parameters
-data_file = "./utility/dR10Devs.mat"
-batch_size = 14  # because we have four devices to learn, and one device to test
+data_file = "./utility/dR11Devs.mat"
+batch_size = 10  # because we have four devices to learn, and one device to test
 learning_rate = 0.003
 training_iters = 1000
 training_iter_step_down_every = 250000
@@ -314,11 +315,11 @@ def train(step):
                                                                             lr: current_learning_rate})
     writer.add_summary(summary, step)
 
-    _, batch_x_test, __, batch_y_test, _, _ = generate_sample(
-        filename=data_file, batch_size=1, samples=n_steps, predict=n_outputs, test=True)
+    #_, batch_x_test, __, batch_y_test, _, _ = generate_sample(
+    #    filename=data_file, batch_size=1, samples=n_steps, predict=n_outputs, test=True)
 
-    batch_x_test = batch_x_test.reshape((1, n_steps, n_input))
-    batch_y_test = batch_y_test.reshape((1, n_outputs))
+    #batch_x_test = batch_x_test.reshape((1, n_steps, n_input))
+    #batch_y_test = batch_y_test.reshape((1, n_outputs))
 
     # loss_value_test, summary = sess.run([loss, merged], feed_dict={
     #                                    x: batch_x_test, y: batch_y_test})
@@ -351,11 +352,7 @@ ani = None  # to make it global
 
 if __name__ == "__main__":
 
-    config = tf.compat.v1.ConfigProto(
-        device_count={'GPU': 0}
-    )
-
-    with tf.compat.v1.Session(config=config) as sess:
+    with tf.compat.v1.Session() as sess:
         sess.run(init)
 
         loss_value = float('+Inf')

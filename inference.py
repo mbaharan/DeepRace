@@ -43,24 +43,22 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 
 _DISCRIPTION = '''
-The file dR15Devs has following devices:\n
+The file dR11Devs has following devices:\n
 idx    Device\n
-00 -> 'Dev#11'\n
-01 -> 'Dev#12'\n
-02 -> 'Dev#14'\n
-03 -> 'Dev#24'\n
-04 -> 'Dev#25'\n
-05 -> 'Dev#26'\n
+idx    Device\n
+00 -> 'Dev#8'\n
+01 -> 'Dev#9'\n
+02 -> 'Dev#11'\n
+03 -> 'Dev#12'\n
+04 -> 'Dev#14'\n
+05 -> 'Dev#24'\n
 06 -> 'Dev#29'\n
 07 -> 'Dev#32'\n
-08 -> 'Dev#33'\n
-09 -> 'Dev#35'\n
-10 -> 'Dev#36'\n
-11 -> 'Dev#37'\n
-12 -> 'Dev#38'\n
-13 -> 'Dev#8'\n
-14 -> 'Dev#9'\n
+08 -> 'Dev#35'\n
+09 -> 'Dev#36'\n
+10 -> 'Dev#38'\n
 '''
+
 parser = argparse.ArgumentParser(
     description='dR Transistor Degradation predicion Based on Stacked LSTM Approch.')
 parser.add_argument('--test-dev', type=int, default=14,
@@ -72,14 +70,14 @@ parser.add_argument('--threshold', type=float, default=0.05,
 
 args = parser.parse_args()
 
-if not(-1 < args.test_dev < 15):
+if not(-1 < args.test_dev < 10):
     print(
-        "test-dev should be a number in [0,14]. Please run thte program with --help for more information.")
+        "test-dev should be a number in [0,9]. Please run thte program with --help for more information.")
     raise ValueError
 
 
 # Parameters
-data_file = "./utility/dR15Devs.mat"
+data_file = "./utility/dR11Devs.mat"
 
 # Network Parameters
 n_input = 1  # Delta{R}
@@ -319,7 +317,7 @@ if __name__ == "__main__":
 
         if len(args.rul_time) > 0:
             print('+'*100)
-            samplePerMin = mat['SamplePerMin'][0, args.test_dev][0]
+            samplePerMin = mat['SamplePerMinuts'][0, args.test_dev][0]
             degAt = int(thr_idx/samplePerMin[0])
             print("{} is degregaded at {} minutes.".format(dev_name, degAt))
             print('-'*100)
