@@ -11,7 +11,7 @@ import matplotlib.animation as animation
 import argparse
 import os
 #LSTM runs faster on CPU
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 tf.compat.v1.disable_eager_execution()
 matplotlib.use("Agg")
@@ -41,7 +41,7 @@ args = parser.parse_args()
 
 if not(-1 < args.test_dev < 11):
     print(
-        "test-dev should be a number in [0,11]. Please run thte program with --help for more information.")
+        "test-dev should be a number in [0,10]. Please run thte program with --help for more information.")
     raise ValueError
 
 # noinspection PyUnresolvedReferences
@@ -74,7 +74,7 @@ Inspired by
 
 # Parameters
 data_file = "./utility/dR11Devs.mat"
-batch_size = 10  # because we have four devices to learn, and one device to test
+batch_size = 10  # because we have 10 devices to learn, and one device to test
 learning_rate = 0.003
 training_iters = 1000
 training_iter_step_down_every = 250000
@@ -83,7 +83,7 @@ updating_plot = 10
 
 # Network Parameters
 n_input = 1  # Delta{R}
-n_steps = 20  # time steps
+n_steps = 21  # time steps
 n_hidden = 32  # Num of features
 n_outputs = 104  # output is a series of Delta{R}+
 n_layers = 4  # number of stacked LSTM layers

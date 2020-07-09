@@ -36,7 +36,6 @@ import numpy as np
 import tensorflow as tf
 tf.compat.v1.disable_eager_execution()
 
-
 import matplotlib.pyplot as plt
 matplotlib.use("Agg")
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -81,7 +80,7 @@ data_file = "./utility/dR11Devs.mat"
 
 # Network Parameters
 n_input = 1  # Delta{R}
-n_steps = 20  # time steps
+n_steps = 21  # time steps
 n_hidden = 32  # Num of features
 n_outputs = 104  # output is a series of Delta{R}+
 n_layers = 4  # number of stacked LSTM layers
@@ -315,6 +314,11 @@ if __name__ == "__main__":
         print('Avg elapsed time for predicting one minute:  {:2.4} mS'.format(
             avg_Time/how_many_seg))
 
+        RUL_LIST=[]
+        RUL_EST_LIST=[]
+        T = []
+        RA_LIST=[]
+        ERR_LIST=[]
         if len(args.rul_time) > 0:
             print('+'*100)
             samplePerMin = mat['SamplePerMinuts'][0, args.test_dev][0]
@@ -322,6 +326,7 @@ if __name__ == "__main__":
             print("{} is degregaded at {} minutes.".format(dev_name, degAt))
             print('-'*100)
             for rul_time in args.rul_time:
+                T.append(rul_time)
                 print("Calculating the RUL at {} considering threshols={}.".format(
                     rul_time, args.threshold))
                 if rul_time > degAt:
@@ -340,14 +345,22 @@ if __name__ == "__main__":
                 RUL_hat = 100 * \
                     abs(prediction_5p[0][-1] - expected_y_p_rul[0]
                         [-1])/prediction_5p[0][-1]
+                RUL_LIST.append(RUL)
                 print("RUL at {} is {:3.1f}".format(rul_time, RUL))
                 print("Estimated RUL at {} is {:3.1f}".format(
                     rul_time, RUL_hat))
+                RUL_EST_LIST.append(RUL_hat)
                 RA = 100*(1-(abs(RUL-RUL_hat)/RUL))
                 Err = RUL - RUL_hat
+                ERR_LIST.append(Err)
+                RA_LIST.append(RA)
                 print("Error at {} is {:3.1f}".format(rul_time, Err))
                 print("RA at {} is {:3.1f}".format(rul_time, RA))
                 print('-'*100)
+        with open('./prediction_output/RUL_{}.txt'.format(dev_name), "w") as file:
+            file.write("Time\tRUL\tRUL_EST\tRA\tERR\n")
+            for i, val in enumerate(RUL_LIST):
+                file.write("{}\t{:2.1f}\t{:2.1f}\t{:2.1f}\t{:2.1f}\n".format(T[i], val, RUL_EST_LIST[i],RA_LIST[i], ERR_LIST[i]))
 
         if TX2_Board_Power:
             print('closing socket')
