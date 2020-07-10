@@ -3,7 +3,7 @@
 
 Deep RACE is a real-time reliability modeling and assessment of power semiconductor devices embedded into a wide range of smart power electronics systems. Deep RACE presents a scalable solution based on two deep learning algorithms that departures from classical and statistical modeling to deep learning-based data analytics. We leverage two states of the art algorithms for time series prediction named Long Short-Term Memory (LSTM) and Temporal Convolutional Networks (TCN) to aggregate reliability modeling of the power converters with the same underlying physics.
 
-
+  
 ## Installation
 You only need to clone the Deep RACE repository:
 ```bash
