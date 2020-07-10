@@ -9,12 +9,12 @@ You only need to clone the Deep RACE repository:
 ```bash
 git clone https://github.com/mbaharan/DeepRace
 ```
-The following instruction is for LSTM model. For TCN model you should first clone then switch the branch to TCN by:
+The following instructions are for the TCN model. For LSTM model you should switch the branch to LSTM by:
 ```bash
 cd DeepRace
 git checkout TCN
 ```
-Please follow the instruction in `README.md` of the `TCN` branch to train and run inference for the TCN model.
+Please follow the instruction in `README.md` of the `LSTM` branch to train and run inference for the LSTM model.
 
 ## Prerequisites
 First make sure you have already installed pip3, Tkinter, and git tools:
