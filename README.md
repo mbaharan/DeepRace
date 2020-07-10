@@ -12,7 +12,7 @@ git clone https://github.com/mbaharan/DeepRace
 The following instructions are for the TCN model. For LSTM model you should switch the branch to LSTM by:
 ```bash
 cd DeepRace
-git checkout TCN
+git checkout LSTM
 ```
 Please follow the instruction in `README.md` of the `LSTM` branch to train and run inference for the LSTM model.
 
@@ -23,21 +23,23 @@ sudo apt install git python3-pip python3-tk
 ```
 You should also install the following python packages:
 ```bash
-sudo -H pip3 install tensorflow scipy matplotlib seaborn
+sudo -H pip3 install scipy matplotlib seaborn numpy torch sklearn glob shutil
 ```
 ## Training the network models
 Change the path to the `DeepRACE` directory and run the `train.py`:
 ```bash
-cd Deep_RACE
-python3 ./train.py --test-dev 0
+cd DeepRace
+python3 train.py --epochs 600 --nhid 15 --ksize 7 --levels 3 --testset 0 --dropout 0
 ```
+There is a training script in ./scripts/train1.sh
+
 For seeing the list of devices, you can run the program with `--help`.
 
 
-All the training models will be saved automatically in `./inference_models/` folder. You can load them by running the `inference.py` file.
+All the training models will be saved automatically in `./output/train/<Time-Date-TCN-model-specs>` folder. You can load them by running the `inference.py` file.
 
 ### Prediction output
-Running `inference.py` file generates and saves the prediction output in a text file. The file name is based on the selected MOSFET device number. For instance, a text file with the name of `./prediction_output/RUL_Dev_14.txt` will be generated for `dev#14`.
+Running `inference.py` file generates and saves the prediction output in a text file. The file name is based on the selected MOSFET device number. For instance, a text file with the name of `./output/train/<Time-Date-TCN-model-specs>/RUL_Dev_14.txt` will be generated for `dev#14`.
 
 ### Testing different MOSFET devices
 You can test different devices from `dR11Devs.mat` by altering [this line](https://github.com/TeCSAR-UNCC/Deep_RACE/blob/68688f2b89a651f0985364c74c2ae949a696338b/train.py#L69) in the `./train.py`.
