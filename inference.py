@@ -324,7 +324,7 @@ def main():
 
     # Load PyTorch model
     model = TCN(args.input_size, args.predict_size,
-                     channel_sizes, kernel_size, dropout=dropout, convolution=args.convolution)
+                     channel_sizes, kernel_size, dropout=dropout)
 
     parameters = model.parameters()
     optimizer = optim.SGD(parameters, lr=args.lr)
@@ -400,7 +400,7 @@ def main():
             yaml.safe_dump(rul_stats, file)
 
     # Dump prediction array for matlab plotting
-    dump_path = '{}/res_{}.txt'.format(output_dir, device_num)
+    dump_path = '{}/RUL_{}.txt'.format(output_dir, device_num)
     np.savetxt(dump_path, out_plot, fmt="%f", newline='\r\n')
     
 if __name__ == '__main__':

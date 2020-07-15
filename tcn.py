@@ -47,8 +47,6 @@ class TemporalBlock(nn.Module):
         self.bn2 = nn.BatchNorm1d(n_outputs)
         self.relu2 = nn.ReLU6()
 
-        self.res_path = distiller.modules.EltwiseAdd(inplace=True)
-
         self.downsample = nn.Conv1d(
             n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
 
@@ -75,7 +73,7 @@ class TemporalBlock(nn.Module):
         return x + res
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2, convolution='normal'):
+    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
         super(TemporalConvNet, self).__init__()
         layers = []
         num_levels = len(num_channels)

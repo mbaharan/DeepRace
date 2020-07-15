@@ -23,9 +23,9 @@ Inspired by
 """
 
 class TCN(nn.Module):
-    def __init__(self, input_size, output_size, num_channels, kernel_size, dropout, convolution):
+    def __init__(self, input_size, output_size, num_channels, kernel_size, dropout):
         super(TCN, self).__init__()
-        self.tcn = TemporalConvNet(1, num_channels, kernel_size=kernel_size, dropout=dropout, convolution=convolution)
+        self.tcn = TemporalConvNet(1, num_channels, kernel_size=kernel_size, dropout=dropout)
         self.linear = nn.Linear(num_channels[-1], output_size)
 
     def forward(self, inputs):
@@ -41,9 +41,9 @@ Used to measure the FLOPS of the model, the flop module requires the input to be
 it to be in another arrangement. This is the reason for two separate classes
 '''
 class TCNFlops(nn.Module):
-    def __init__(self, input_size, output_size, num_channels, kernel_size, dropout, convolution):
+    def __init__(self, input_size, output_size, num_channels, kernel_size, dropout):
         super(TCNFlops, self).__init__()
-        self.tcn = TemporalConvNet(1, num_channels, kernel_size=kernel_size, dropout=dropout, convolution=convolution)
+        self.tcn = TemporalConvNet(1, num_channels, kernel_size=kernel_size, dropout=dropout)
         self.linear = nn.Linear(num_channels[-1], output_size)
 
     def forward(self, inputs):

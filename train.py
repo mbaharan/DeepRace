@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from model import TCN, TCNFlops
-
+from ptflops import get_model_complexity_info
 import numpy as np
 
 import scipy.io as matloader
@@ -135,11 +135,11 @@ def main():
 
     # Load model for training and inference
     model = TCN(args.input_size, args.predict_size,
-                channel_sizes, kernel_size, dropout=dropout, convolution=args.convolution)
+                channel_sizes, kernel_size, dropout=dropout)
 
     # Different model used to calculate the FLOPS, it fits the ptflops input tuple (whereas the model above does not)
     model_flops = TCNFlops(args.input_size, args.predict_size,
-                           channel_sizes, kernel_size, dropout=dropout, convolution=args.convolution)
+                           channel_sizes, kernel_size, dropout=dropout)
 
     # Calculate the number of trainable parameters within the model
     model_size = sum([m.numel() for m in model.parameters()])
@@ -219,7 +219,6 @@ def main():
     # The directory where the model will be saved
     output_base = './output'
     exp_name = '_'.join([
-        args.convolution,
         datetime.now().strftime("%m_%d_%y__%H%M"),
         "TCN",
         str(args.input_size),
