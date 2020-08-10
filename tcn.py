@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import sys
 import os
 import numpy as np
+from utility.helpers import init_xavier
 
 
 """
@@ -29,51 +30,55 @@ Inspired by
 
 
 class TemporalBlock(nn.Module):
-    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout):
         super(TemporalBlock, self).__init__()
 
-        # Modified the way padding was done from the original code base
+        # kernel_size = (1, kernel_size)
+        # dilation = (1, dilation)
+        
         self.pad1 = nn.ConstantPad1d((0, padding), 0)
 
-        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size=kernel_size,
-                               stride=stride, padding=0, dilation=dilation)
-        self.bn1 = nn.BatchNorm1d(n_outputs)
-        self.relu1 = nn.ReLU6()
+        self.DSConv1 = nn.Sequential(
+            nn.Conv1d(n_inputs, n_inputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_inputs),
+            nn.BatchNorm1d(n_inputs),
+            nn.ReLU6(),
+            nn.Conv1d(n_inputs, n_outputs, kernel_size=1),
+            nn.BatchNorm1d(n_outputs),
+            nn.ReLU6()
+        )
 
         self.pad2 = nn.ConstantPad1d((0, padding), 0)
 
-        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size=kernel_size,
-                               stride=stride, padding=0, dilation=dilation)
-        self.bn2 = nn.BatchNorm1d(n_outputs)
-        self.relu2 = nn.ReLU6()
+        self.DSConv2 = nn.Sequential(
+            nn.Conv1d(n_outputs, n_outputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_outputs),
+            nn.BatchNorm1d(n_outputs),
+            nn.ReLU6(),
+            nn.Conv1d(n_outputs, n_outputs, kernel_size=1),
+            nn.BatchNorm1d(n_outputs),
+            nn.ReLU6()
+        )
+
+        self.relu = nn.ReLU6()
 
         self.downsample = nn.Conv1d(
             n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
-
-        # Can use normal weight initialization over xavier if preferred, just remove xavier from train.py
-    #     self.init_weights()
-
-    # def init_weights(self):
-    #     self.conv1.weight.data.normal_(0, 0.01)
-    #     if self.downsample is not None:
-    #         self.downsample.weight.data.normal_(0, 0.01)
 
     def forward(self, x):
 
         res = x if self.downsample is None else self.downsample(x)
 
         x = self.pad1(x)
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
+        x = self.DSConv1(x)
         x = self.pad2(x)
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu2(x)
-        return x + res
+        x = self.DSConv2(x)
+        x = x + res
+        out = self.relu(x)
+
+        return out
+
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
+    def __init__(self, num_inputs, num_channels, kernel_size, dropout):
         super(TemporalConvNet, self).__init__()
         layers = []
         num_levels = len(num_channels)
@@ -90,5 +95,10 @@ class TemporalConvNet(nn.Module):
 
         self.network = nn.Sequential(*layers)
 
+        """ Initialize weights with xavier algorithm uniformly
+        http://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf 
+
+        """
+        self.network.apply(init_xavier)
     def forward(self, x):
         return self.network(x)

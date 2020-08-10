@@ -1,0 +1,24 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Inference",
+            "type": "python",
+            "request": "launch",
+            "program": "inference.py",
+            "console": "integratedTerminal",
+            "args": ["--config", "/home/steve/DeepRace/output/train/08_04_20__1407_TCN_21_104_15_3_Dev_1/args.yaml",
+                "--rul-time", "77", "83", "90", "95", "101", "107", "114", "117", "119", "122", "123"   ]
+        },
+        {
+            "name": "Train",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal"
+        }
+    ]
+}

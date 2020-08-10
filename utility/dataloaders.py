@@ -105,7 +105,7 @@ class NASADataSet(Dataset):
                     # Needed to reach the end of the datasample (if not easily divisible by the input + prediction window)
                     if inference:
                         print('+ Inference mode.')
-                        _how_many += 1
+                        #_how_many += 1
                     for i in range(_how_many):
                         print("-> Processing Device({})-{:3.2f}%".format(val,
                                                                          i*100/_how_many), end='\r')

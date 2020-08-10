@@ -35,19 +35,19 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--data-dir', type=str, default='./utility/dR11Devs.mat',
                     help='Path to mat file containing transistor degradation')
-parser.add_argument('--epochs', type=int, default=1000,
+parser.add_argument('--epochs', type=int, default=2000,
                  help='upper epoch limit (default: 100)')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', dest="batch_size",
                     help='batch size (default: 256)')
-parser.add_argument('--nhid', type=int, default=37,
+parser.add_argument('--nhid', type=int, default=15,
                     help='number of hidden units per layer (default: 8)')
 parser.add_argument('--input-size', type=int, default=21, dest='input_size',
                     help='valid sequence length (default: 320)')
-parser.add_argument('--predict-size', type=int, default=104, dest='predict_size',
+parser.add_argument('--predict-size', type=int, default=21, dest='predict_size',
                     help='valid sequence length (default: 320)')
 parser.add_argument('--ksize', type=int, default=7,
                     help='kernel size (default: 3)')
-parser.add_argument('--levels', type=int, default=4,
+parser.add_argument('--levels', type=int, default=3,
                     help='# of levels (default: 4)')
 parser.add_argument('--lr', type=float, default=1,
                     help='initial learning rate (default: 1)')
@@ -61,11 +61,11 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--val-interval', type=int, default=1, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--decay-epochs', type=float, default=200, metavar='N', dest="decay_epochs",
+parser.add_argument('--decay-epochs', type=float, default=250, metavar='N', dest="decay_epochs",
                     help='epoch interval to decay LR')
-parser.add_argument('--testset', type=int, default=1,
+parser.add_argument('--testset', type=int, default=0,
                     help='The data sample to use as the testset (Default: 11')
-parser.add_argument('--dropout', type=float, default=0.2,
+parser.add_argument('--dropout', type=float, default=0.1,
                     help='dropout applied to layers (default: 0.0)')
 parser.add_argument('--optim', type=str, default='SGD',
                     help='optimizer to use (default: SGD)')
@@ -75,7 +75,26 @@ parser.add_argument('--dump-pdf', type=str, default='', dest="dump_pdf",
                     help='Save pdf of model architecture')
 parser.add_argument('--total-dev', type=int, default=11, dest='total_dev',
                     help='The number of devices to train against (Default: 11')
-
+# Online-quantization
+parser.add_argument('--quantize', default='', type=str, metavar='PATH',
+                    help='Resume and quantize pretrained model')
+parser.add_argument('--quant-aware',default='', type=str, metavar='PATH',
+                    dest='quant_aware', help='Path to quant_aware_linear YAML config file')
+# Set the bit-width
+parser.add_argument('--bit',default=None, type=int,
+                     help='Bit width to quantize to')
+parser.add_argument('--bit-override',default='', type=str, dest='bit_override',
+                     help='Override first layer with 8 bit')
+# Batch-fusion
+parser.add_argument('--fuse-bn',default=None, type=str,
+                    dest='fuse_bn', help='Fuse BN to Conv')
+# Post-training range-based linear quantization
+# Generate calibration file (first step) to calculate min/max values
+parser.add_argument('--calibrate',default=None, type=str, metavar='PATH',
+                    help='Path to quant_aware_linear YAML config file')
+# Perform range-based linear quantization
+parser.add_argument('--quant-post', default=None, type=str,
+                    dest='qe_config_file', help='Path to quant_post_linear YAML config file')
 
 """
 Copyright (c) 2020, University of North Carolina at Charlotte All rights reserved.
@@ -127,7 +146,39 @@ args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
 # Load in the MatLab file containing the device samples
 filename = args.data_dir
 
+
+"""Quantization steps:
+    1. Train as normal (32FP) with nn.ReLU6 (no nn.ReLU) and HardSigmoid (no normal sigmoid). DO NOT FUSE BN
+    ** Recommend batch size around 128 **
+        -> This outputs a 32FP model.
+        
+    2. Online quantization with quant_aware_linear.yaml (N is the bit width resolution i.e. 4 or 8. It can be any number):
+    (--load <path/to/32FP_model.pth> | --quant-aware 1 | --bit N | --fuse-bn 1 (this fuses batch norm and conv together))
+    **I recommend setting the --warmup-epoch to zero and the learning rate (--lr) to 1e-4 or lower and the --decay-epoch to 5ish**
+        -> This outputs a 32FP model that has been fine-tuned using a FakeQuantizationLayer with fused layers
+    3. Calibrate the min/max values per layer (N is the bit width resolution i.e. 4 or 8. It can be any number):
+    (--load <path/to/quantized_model_DIR/quantized_model.pth> | --calibrate 1 | --bit N | --fuse-bn 1)
+    **You can set a much much higher batch size since the model will be in evaluation mode**
+        -> This outputs quantization statics to <path/to/quantized_model_DIR
+    4. Post training quantization using the tuned model and the calibration statics yaml file. Copy the absolute path of the calibration
+    yaml file and add it to the 'model_activation_stats:' line in the quant_post_linear.yaml file.
+        (--load <path/to/quantized_model_DIR/quantized_model.pth> | --quant-post <path/to/quant_post_linear.yaml> | --fuse-bn 1)
+    **You can set a much much higher batch size since the model will be in evaluation mode**
+        -> This outputs a new model in the <path/to/quantized_model_DIR/>
+"""
+compression_scheduler = None
+
+
+
 def main():
+    
+    # Output DIR for quantization stats
+    qe_dir = args.resume.split('/')
+    qe_dir.pop(-1)
+    qe_dir = '/'.join(qe_dir)
+    quant_stats = '{}/qe_stats/quantization_stats.yaml'.format(qe_dir)
+    print("Quant stats @ {}".format(quant_stats))
+
 
     channel_sizes = [args.nhid] * args.levels
     kernel_size = args.ksize
@@ -162,11 +213,115 @@ def main():
     if torch.cuda.is_available():
         print('-> Using CUDA!')
         model.cuda()
-
+        
     # Optionally resume from checkpoint
     resume_state = {}
     resume_epoch = None
-    if args.resume:
+
+    if args.quantize:
+        if args.bit == 4:
+            if args.quant_aware or args.calibrate:
+                # For online quantization (Step 1)
+                quantization_aware_yaml = './quantization_configs/quant_aware_linear_4bit.yaml'
+                print('-> Loading quantization aware (4-bit): {}'.format(quantization_aware_yaml))
+            elif args.qe_config_file:
+                # For post training quantization (Step 4?)
+                quantization_post_yaml = './quantization_configs/quant_post_linear_4bit.yaml'
+                args.qe_config_file = quantization_post_yaml
+                with open(quantization_post_yaml) as f:
+                    list_doc = yaml.load(f)
+                    list_doc['quantizers']['linear_quantizer']['model_activation_stats'] = quant_stats
+                    with open(quantization_post_yaml, 'w') as f:
+                        yaml.dump(list_doc, f, default_flow_style=False)
+                print('-> Pointing post quantization YAMl to: {}'.format(quant_stats))
+
+        if args.bit == 8:
+            if args.quant_aware or args.calibrate:
+                # For online quantization (Step 1)
+                quantization_aware_yaml = './quantization_configs/quant_aware_linear_8bit.yaml'
+                print('-> Loading quantization aware (8-bit): {}'.format(quantization_aware_yaml))
+            elif args.qe_config_file:
+                # For post training quantization (Step 4)
+                quantization_post_yaml = './quantization_configs/quant_post_linear_8bit.yaml'
+                args.qe_config_file = quantization_post_yaml
+                print('-> Loading post quantization (8bit): {}'.format(quantization_post_yaml))
+                with open(quantization_post_yaml) as f:
+                    list_doc = yaml.safe_load(f)
+                    list_doc['quantizers']['linear_quantizer']['model_activation_stats'] = quant_stats
+                    with open(quantization_post_yaml, 'w') as f:
+                        yaml.dump(list_doc, f, default_flow_style=False)
+                print('-> Pointing post quantization YAMl to: {}'.format(quant_stats))
+
+        if args.resume and not args.quant_aware and not args.calibrate:
+            if args.fuse_bn:
+                print("-> Fusing BN to conv...")
+                model = fuse_bn_recursively(model)
+
+                print("-> Preparing model for quantization-aware training...")
+                compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
+
+                print("-> Resuming from checkpoint for Online Quantization...")
+                load_checkpoint(model, args.resume)
+
+        if args.quant_aware and not args.qe_config_file and not args.calibrate:
+            print("-> Loading from checkpoint for Online Quantization...")
+            load_checkpoint(model, args.resume)
+
+            # Fuse BN layers (step 1a)
+            if args.fuse_bn:
+                print("-> Fusing BN to conv...")
+                model = fuse_bn_recursively(model)
+            # Quantization-aware training (step 2)
+
+            print("-> Preparing model for quantization-aware training...")
+            compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
+
+        if args.resume and args.calibrate:
+            print("-> Preparing model for calibration...")
+            
+            if args.batch_size <= 128:
+                print("**-> You can set your batch size higher if able (currently: {}), model will be in eval()<-**".format(args.batch_size))
+
+            if args.fuse_bn:
+                print("-> Fusing BN to conv...")
+                model = fuse_bn_recursively(model)
+                
+            print("-> Compression...")
+            compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
+
+            print("-> Loading checkpoint...")
+            load_checkpoint(model, args.resume)
+
+        
+        if args.resume and args.qe_config_file:
+            print("-> Post training range-based quantization...")
+
+            if args.fuse_bn:
+                print("-> Fusing BN to conv...")
+                model = fuse_bn_recursively(model)
+
+
+
+            print("-> Loading from checkpoint...")
+            same_keys, new_state_dict = load_checkpoint_post(model, args.load)
+
+            base_bone = OrderedDict()
+            for key in same_keys:
+                base_bone[key] = new_state_dict[key]
+            
+            print("-> Loading new state dictionary...")
+            model.load_state_dict(base_bone)
+
+            
+
+            print("-> Preparing quantizer")
+            quantizer = ds.quantization.PostTrainLinearQuantizer.from_args(model, args)
+            print("-> Dummy input")
+            dummy_input = torch.rand((1, 3, args.img_size, args.img_size)).cuda()
+            
+            quantizer.prepare_model(dummy_input)
+
+    elif resume_state:
         resume_state, resume_epoch = resume_checkpoint(model, args.resume)
         if 'optimizer' in resume_state:
             print('Restoring Optimizer state from checkpoint')
@@ -181,16 +336,13 @@ def main():
         print('-> Using CUDA!')
         model.cuda()
 
-    """ Initialize weights with xavier algorithm uniformly
-        http://proceedings.mlr.press/v9/glorot10a/glorot10a.pdf 
-    """
-    model.apply(init_xavier)
+  
 
     # The index of the test sample
     test_idx = [args.testset]
 
     # RealTime provides more datasamples by creating a sliding window over the entire dataset, incrementing by one each time.
-    trainset = NASARealTime(filename,
+    trainset = NASADataSet(filename,
                              args.input_size,
                              args.predict_size,
                              test_idx,
@@ -215,6 +367,44 @@ def main():
 
     best_metric = None
     best_epoch = None
+
+
+    if args.calibrate:
+        ds.utils.assign_layer_fq_names(model)
+        print("=> Generating quantization calibration stats based on {0} users".format(args.calibrate))
+        collector = ds.data_loggers.QuantCalibrationStatsCollector(model)
+        
+        print("=> Validating...")
+        with collector_context(collector):
+            validate(model, testloader, loss_fn)
+
+
+        qe_path = os.path.join(qe_dir, 'qe_stats')
+        if not os.path.isdir(qe_path):
+            os.mkdir(qe_path)
+        yaml_path = os.path.join(qe_path, 'quantization_stats.yaml')
+        collector.save(yaml_path)
+        print("Quantization statics is saved at {}".format(yaml_path))
+        return
+
+    if args.qe_config_file is not None:
+        print("-> validating post quant...")
+        validate(model, testloader, loss_fn)
+        qe_path = os.path.join(qe_dir, 'post_model')
+        if not os.path.isdir(qe_path):
+            os.mkdir(qe_path)
+        model_path = os.path.join(qe_path, 'model.pth')
+        torch.save(model.state_dict(), model_path)
+        print("Post quantized model is saved at {}".format(model_path))
+        return
+
+
+    print(model)
+
+
+
+
+
 
     # The directory where the model will be saved
     output_base = './output'

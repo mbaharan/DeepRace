@@ -238,4 +238,8 @@ def get_outdir(path, *paths, inc=False):
 
 def init_xavier(m):
     if type(m) == nn.Conv1d:
-        nn.init.xavier_uniform(m.weight.data)
+        nn.init.xavier_uniform_(m.weight.data)
+    elif type(m) == nn.Conv2d:
+        nn.init.xavier_uniform_(m.weight.data)
+    elif type(m) == nn.Linear:
+        nn.init.xavier_uniform_(m.weight.data)

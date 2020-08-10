@@ -112,13 +112,13 @@ def find_log_mse(tar_error, out_error):
     mse = mean_squared_error(tar_error, out_error)
     return np.log(mse)
 
-def report(batch_count, avg_time, out, tar, error_index, error_at_5_percent, logMSE, output_dir, device_num, RUL, RUL_hat, RUL_time, RUL_error, RA):
+def report(out, tar, error_index, error_at_5_percent, logMSE, output_dir, device_num, RUL, RUL_hat, RUL_time, RUL_error, RA):
     """Logs the results to the console"""
 
     print('_' * 80)
     print('===  Current Test: {}'.format(device_num))
     print('-' * 80)
-    print('\nAverage inference time for (1/{}) predictions: {:.4}'.format(batch_count, avg_time))
+    #print('\nAverage inference time for (1/{}) predictions: {:.4}'.format(batch_count, avg_time))
     print('5% Prediction = {:.8}\n5% Target = {:.8}\n5% Error = {:.4}%'.format(out[error_index], tar[error_index], error_at_5_percent))
     print('Log(MSE) = {}\n'.format(logMSE))
 
@@ -130,6 +130,8 @@ def report(batch_count, avg_time, out, tar, error_index, error_at_5_percent, log
         print('Error = {:3.1f}'.format(RUL_error[i]))
         print('RA = {:3.1f}\n'.format(RA[i]))
 
+    print('Average RA: {}'.format(np.average(RA)))
+    print('Average RUL Error: {}'.format(np.average(RUL_error)))
     print('Saving statistics to {}'.format(output_dir))     
     print('_' * 80)
 
@@ -141,7 +143,7 @@ def plot(out, tar, device_num, output_dir):
     #plt.hlines(y=0.05, xmin=0, xmax=len(out), colors='g', linestyles='-', lw=2)
     plt.plot(range(len(out)), out, 'b',
                 label='Testset# {} - Predicted'.format(device_num))
-    plt.plot(range(len(out)), tar, 'r', alpha=0.6,
+    plt.plot(range(len(tar)), tar, 'r', alpha=0.6,
                 label='Testset# {} - Measured'.format(device_num))
 
     plt.legend(loc='upper left')
@@ -157,9 +159,9 @@ def plot(out, tar, device_num, output_dir):
     #plt.savefig('{}/{}_full.png'.format('results', device_num))
 
 
-def find_degradation(args, error_index, mat, out_error, tar_error, final_gold):
+def find_degradation(args, model, mean, std, prediction, error_index, mat, actual_device):
     sample_per_min = mat['SamplePerMinuts'][0, args.testset][0]
-    deg_at = np.argmax(final_gold >= args.threshold) // sample_per_min
+    deg_at = np.argmax(actual_device >= args.threshold) // sample_per_min
     
     RUL = np.array([])
     RUL_hat = np.array([])
@@ -174,7 +176,7 @@ def find_degradation(args, error_index, mat, out_error, tar_error, final_gold):
 
         rul_time_idx = int(rul_time * sample_per_min[0])
 
-        _, y_p_rul, _, expected_y_p_rul, _, _ = generate_sample(filename=args.filename,
+        _, _, _, target_rul, _, _ = generate_sample(filename=args.filename,
                                                                 batch_size=1,
                                                                 samples=args.input_size, 
                                                                 predict=args.predict_size,
@@ -182,8 +184,9 @@ def find_degradation(args, error_index, mat, out_error, tar_error, final_gold):
                                                                 test=True,
                                                                 test_set=[args.testset])
 
-        _RUL = 100 * abs(final_gold[rul_time_idx] - final_gold[-1]) / final_gold[-1]
-        _RUL_hat = 100 * abs(out_error[-1] - expected_y_p_rul[0][-1]) / out_error[-1]
+
+        _RUL = 100 * abs(actual_device[rul_time_idx] - actual_device[-1]) / actual_device[-1]
+        _RUL_hat = 100 * abs(prediction[-1] - target_rul[0][-1]) / prediction[-1]
         _RUL_error = _RUL - _RUL_hat
         _RA = 100 * (1 - abs(_RUL_error / _RUL))
 
@@ -193,93 +196,10 @@ def find_degradation(args, error_index, mat, out_error, tar_error, final_gold):
         RUL_error = np.append(RUL_error, _RUL_error)
         RA = np.append(RA, _RA)
 
-    return RUL, RUL_hat, RUL_time, RUL_error, RA
-
-def inference(model, loader, args):
-    """Test the trained network"""
-    print('-> Running inference...')
-    # Set Batch Norm and Dropout to eval mode
-    # Batch norm will use the running mean and variance calculated during training
-    model.eval()
-
-    # Turns off back propagation (learning) and speeds up computation
-    with torch.no_grad():
-        # The output (prediction) of the model
-        out_error = np.array([])
-        out_plot = np.array([])
-
-        # The target (actual) outcome
-        tar_error = np.array([])
-        tar_plot = np.array([])
-
-        # Keep count of the number of batches so we can find the average inference time per batch
-        batch_count = 0
-
-        for _, (input, target) in enumerate(loader):
-            # Sums up all of the batch inference times
-            sum_batch_inference_time = 0
-
-            # Increment the batch count
-            batch_count += 1
-            
-            # Send input and target to GPU for computation, if available
-            if torch.cuda.is_available():
-                input, target = input.cuda(), target.cuda()
-
-            # Start the inference timer
-            tstart = time.time()
-
-            # Inference
-            output = model(input)
-
-            # End the inference timer
-            tend = time.time()
-
-            # inference time
-            inference_time = tend - tstart
-
-            # Running total of inference time
-            sum_batch_inference_time += inference_time
-
-            # Use normal (Gaussian) distribution
-            if loader.dataset.normal_dis:
-                std = loader.dataset.std
-                mean = loader.dataset.mean
-                # Convert Torch.Tensor to numpy array for calculations
-                input_numpy = input[0].cpu().numpy()
-                output_numpy = output[0].cpu().numpy()
-                target_numpy = target[0].cpu().numpy()
-            
-            # Use min/max normalization
-            else:
-                std = (loader.dataset.max_arr - loader.dataset.min_arr)/2
-                mean = loader.dataset.min_arr
-                # Convert Torch.Tensor to numpy array for calculations
-                input_numpy = input[0].cpu().numpy() + 1
-                output_numpy = output[0].cpu().numpy() + 1 
-                target_numpy = target[0].cpu().numpy() + 1
-
-            # Append the denormalized input/output to the plot array (needs both input and output to plot)
-            out_plot = np.append(out_plot, ((input_numpy * std) + mean))
-            out_plot = np.append(out_plot, ((output_numpy * std) + mean))
-
-            # Append the denormalized output to the output error array (Faster error calculation without input)
-            out_error = np.append(out_error, ((output_numpy * std) + mean))
-
-            # Append the denormalized input/target to the plot array (needs both input and target to plot)
-            tar_plot = np.append(tar_plot, ((input_numpy * std) + mean))
-            tar_plot = np.append(tar_plot, ((target_numpy * std) + mean))
-
-            # Append the denormalized output to the tar (target) array Faster error calculation without input)
-            tar_error = np.append(tar_error, ((target_numpy * std) + mean))
-
-            # Waits for all kernels in all streams on a CUDA device to complete
-            torch.cuda.synchronize()
-
-        # Calculate the average inference time
-        avg_time = sum_batch_inference_time / batch_count
-
-    return out_plot, out_error, tar_plot, tar_error, avg_time, batch_count
+    
+    RA_avg = np.average(RA)
+    RUL_error_avg = np.average(RUL_error)
+    return RUL, RUL_hat, RUL_time, RUL_error, RA, RA_avg, RUL_error_avg
 
 
 def main():
@@ -296,22 +216,19 @@ def main():
     # Load dataset from matlab file
     mat = matloader.loadmat(args.filename)
 
-    # No longer used?
-    if args.tail:
-        error_at5_percent = True
-    else:
-        error_at5_percent = False
-
     # Dataloader for the test device
-    testset = NASADataSet(args.data_dir,
+    testset = NASARealTime(args.data_dir,
                           args.input_size,
                           args.predict_size,
                           test_idx,
-                          inference=True,
+                          #inference=True,
                           train=False,
                           normalize=True)#, error_at5percent=error_at5_percent)
     testloader = DataLoader(testset, batch_size=1,
                             shuffle=False, drop_last=True)
+
+    std = testloader.dataset.std
+    mean = testloader.dataset.mean
 
     # Current test device number
     device_num = testset.dev_names[0, args.testset][0]
@@ -338,43 +255,78 @@ def main():
         print('+ Using CUDA!')
         model.cuda()
 
-    # Run inference
-    out_plot, out_error, tar_plot, tar_error, avg_time, batch_count = inference(model, testloader, args)
+   # The current device being tested
+    actual_device = mat['vals'][0, args.testset][0]
 
-    chomp = len(out_error) - len(tar_error)
-    out_error = out_error[:-chomp]
-    out_plot = out_plot[:-chomp]
-
-    # The current device being tested
-    final_gold = mat['vals'][0, args.testset][0]
+    total_dev_len = actual_device.size
+    how_many_seg = int(total_dev_len / (args.input_size + args.predict_size))
 
     # The index (timestep) where the target (actual) value is >= the threshold (0.05)
-    error_index = find_index(tar_error >= args.threshold)
+    error_index = find_index(actual_device >= args.threshold)
     if error_index == -1:
-        max_value = np.max(tar_error)
-        max_index = np.where(tar_error == np.max(tar_error))
+        error_index = total_dev_len - 1
+        print('{} Cannot be defined as the threshold value. It has been changed to the highest value found'.format(args.threshold))
 
-        print('Threshold value {} does not exist in device {}. Max value: {} at index {}'.format(args.threshold, args.testset, max_value, max_index))
-        sys.exit(-1)
+
+    out = np.array([])
+    tr = np.array([])
+
+    pred_lst = np.array([])
+    out_lst = np.array([])
+
+    # Collect the input, prediction, and target, for the entire dataset.
+    for i in range(how_many_seg):
+        _, y, next_t, expected_y, _, _ = generate_sample(filename=args.filename,
+                                                            batch_size=1, samples=args.input_size, predict=args.predict_size,
+                                                            start_from=i * (args.input_size + args.predict_size), test=True, test_set=test_idx)
+
+        test_input = (y - mean)/std
+        test_input = torch.from_numpy(test_input).float().cuda()
+
+        prediction = model(test_input)
+        prediction = (prediction * std) + mean
+        prediction = prediction.cpu().detach().numpy()
+
+        pred_lst = np.hstack((pred_lst, y[0]))  # Input Seq
+        pred_lst = np.hstack((pred_lst, prediction[0]))  # Prediction
+
+        out_lst = np.hstack((out_lst, y[0]))
+        out_lst = np.hstack((out_lst, expected_y[0]))
+
+        out = np.hstack((out, prediction[0]))
+        tr = np.hstack((tr, expected_y[0]))
+
+
+    # Get the prediction at threshold (0.05)
+    _, y_p, _, expected_y_p, _, _ = generate_sample(filename=args.filename,
+                                                batch_size=1, samples=args.input_size, predict=args.predict_size,
+                                                start_from=error_index - (args.input_size + args.predict_size), test=True, test_set=test_idx)
+
+    y_p = (y_p - mean)/std
+    y_p = torch.from_numpy(y_p).float().cuda()
     
+    expected_y_p = torch.from_numpy(expected_y_p).float().cuda()
+    prediction_5p = model(y_p)
+    prediction_5p = (prediction_5p * std) + mean
+    prediction_5p = prediction_5p.cpu().detach().numpy()
+
     # Calculate the error at 5% ( R_DS(ON) = 0.05 )
-    error_at_5_percent = find_error_at_5_percent(out_error, tar_error, error_index)
+    error_at_5_percent = find_error_at_5_percent(prediction_5p[0], expected_y_p[0], -1)
 
     # Calculate the Log(MSE)
-    logMSE = find_log_mse(out_error, tar_error)
+    logMSE = find_log_mse(out, tr)
 
     # Plot the predicted R_DS(ON) for the entire device lifetime
-    plot(out_plot, tar_plot, device_num, output_dir)
+    plot(pred_lst, out_lst, device_num, output_dir)
 
     # Calculate the device degradation
-    RUL, RUL_hat, RUL_time, RUL_error, RA = find_degradation(args, error_index, mat, out_error, tar_error, final_gold)
+    RUL, RUL_hat, RUL_time, RUL_error, RA, RA_avg, RUL_error_avg = find_degradation(args, model, mean, std, prediction_5p[0], error_index, mat, actual_device)
     
     # Logs results
-    report(batch_count,
-           avg_time,
-           out_error,
-           tar_error,
-           error_index,
+    report(
+           prediction_5p[0],
+           expected_y_p[0],
+           -1,
            error_at_5_percent,
            logMSE,
            output_dir,
@@ -384,9 +336,10 @@ def main():
     # Stats to dump into YAML file
     stats = [
         {'Device_#' : [str(device_num)]},
-        {'Average_inference_time' : [avg_time]},
         {'Error_at_5_percent' : [float(error_at_5_percent)]},
-        {'Log(MSE)' : [float(logMSE)]}]
+        {'Log(MSE)' : [float(logMSE)]},
+        {'Average RA' : [float(RA_avg)]},
+        {'Average RUL Error' : [float(RUL_error_avg)]}]
 
     with open('{}/inference_stats.yaml'.format(output_dir), 'w') as file:
         yaml.safe_dump(stats, file)
@@ -401,7 +354,7 @@ def main():
 
     # Dump prediction array for matlab plotting
     dump_path = '{}/RUL_{}.txt'.format(output_dir, device_num)
-    np.savetxt(dump_path, out_plot, fmt="%f", newline='\r\n')
+    np.savetxt(dump_path, pred_lst, fmt="%f", newline='\r\n')
     
 if __name__ == '__main__':
     main()
