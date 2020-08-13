@@ -1,0 +1,13 @@
+quantizers:
+  linear_quantizer:
+    bits_accum: 32
+    bits_activations: 8
+    bits_parameters: 4
+    class: PostTrainLinearQuantizer
+    clip_acts: NONE
+    clip_half_range: false
+    mode: ASYMMETRIC_UNSIGNED
+    model_activation_stats: ./output/train/20200325-132642-efficientnet_bc4-128/qe_stats/quantization_stats.yaml
+
+    per_channel_wts: true
+    scale_approx_mult_bits: 8
