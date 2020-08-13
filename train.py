@@ -20,8 +20,16 @@ from os import path
 from collections import OrderedDict
 import yaml
 
+# Batch norm fusion
+from pytorch_bn_fusion.bn_fusion import fuse_bn_recursively, fuse_bn_sequential
+
+# Distiller Quantization
+import distiller as ds
+from distiller.data_loggers import collector_context
+from distiller import file_config
 from utility.dataloaders import NASADataSet, NASARealTime
 from utility.helpers import resume_checkpoint, load_checkpoint, load_checkpoint_post, AverageMeter, CheckpointSaver, get_outdir, init_xavier
+
 
 warnings.filterwarnings("ignore")   # Suppress the RunTimeWarning on unicode
 
@@ -35,7 +43,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--data-dir', type=str, default='./utility/dR11Devs.mat',
                     help='Path to mat file containing transistor degradation')
-parser.add_argument('--epochs', type=int, default=2000,
+parser.add_argument('--epochs', type=int, default=4000,
                  help='upper epoch limit (default: 100)')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', dest="batch_size",
                     help='batch size (default: 256)')
@@ -43,7 +51,7 @@ parser.add_argument('--nhid', type=int, default=15,
                     help='number of hidden units per layer (default: 8)')
 parser.add_argument('--input-size', type=int, default=21, dest='input_size',
                     help='valid sequence length (default: 320)')
-parser.add_argument('--predict-size', type=int, default=21, dest='predict_size',
+parser.add_argument('--predict-size', type=int, default=104, dest='predict_size',
                     help='valid sequence length (default: 320)')
 parser.add_argument('--ksize', type=int, default=7,
                     help='kernel size (default: 3)')
@@ -61,11 +69,11 @@ parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--val-interval', type=int, default=1, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--decay-epochs', type=float, default=250, metavar='N', dest="decay_epochs",
+parser.add_argument('--decay-epochs', type=float, default=1000, metavar='N', dest="decay_epochs",
                     help='epoch interval to decay LR')
 parser.add_argument('--testset', type=int, default=0,
                     help='The data sample to use as the testset (Default: 11')
-parser.add_argument('--dropout', type=float, default=0.1,
+parser.add_argument('--dropout', type=float, default=0.2,
                     help='dropout applied to layers (default: 0.0)')
 parser.add_argument('--optim', type=str, default='SGD',
                     help='optimizer to use (default: SGD)')
@@ -166,12 +174,12 @@ filename = args.data_dir
     **You can set a much much higher batch size since the model will be in evaluation mode**
         -> This outputs a new model in the <path/to/quantized_model_DIR/>
 """
-compression_scheduler = None
+
 
 
 
 def main():
-    
+    compression_scheduler = None
     # Output DIR for quantization stats
     qe_dir = args.resume.split('/')
     qe_dir.pop(-1)
@@ -347,22 +355,17 @@ def main():
                              args.predict_size,
                              test_idx,
                              train=True,
-                             normalize=True,
-                             normal_dis=True,
                              total_dev=args.total_dev)
-    trainloader = DataLoader(trainset, num_workers=8,
-                             batch_size=args.batch_size, shuffle=True)
+    trainloader = DataLoader(trainset, num_workers=0,
+                             batch_size=args.batch_size, shuffle=False)
     # Fewer datasamples, number of data points / (prediction window + input sequence size)
     testset = NASADataSet(filename,
                             args.input_size,
                             args.predict_size,
                             test_idx,
-                            inference=False,
                             train=False,
-                            normalize=True,
-                            normal_dis=True,
                             total_dev=args.total_dev)
-    testloader = DataLoader(testset, num_workers=8,
+    testloader = DataLoader(testset, num_workers=0,
                             batch_size=args.batch_size, shuffle=False)
 
     best_metric = None
@@ -401,11 +404,6 @@ def main():
 
     print(model)
 
-
-
-
-
-
     # The directory where the model will be saved
     output_base = './output'
     exp_name = '_'.join([
@@ -429,6 +427,23 @@ def main():
     check_epoch = None
     counter = 0
     lr = optimizer.param_groups[0]['lr']
+
+    if args.testset == 0:
+        with open ('scripts/inference.sh', 'w') as rsh:
+            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 77 83 90 95 101 107 114 117 119 122 123".format(output_dir+'/args.yaml'))
+
+    if args.testset == 1:
+            with open ('scripts/inference.sh', 'w') as rsh:
+                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 119 128 138 147 156 164 175 180 184 188 193 194".format(output_dir+'/args.yaml'))
+
+    if args.testset == 4:
+            with open ('scripts/inference.sh', 'w') as rsh:
+                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 89 95 100 106 113 116 119 121 124 126 133".format(output_dir+'/args.yaml'))
+
+    if args.testset == 9:
+            with open ('scripts/inference.sh', 'w') as rsh:
+                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 130 139 151 161 170 175 180 185 189".format(output_dir+'/args.yaml'))
+
     print('Scheduled epochs: {}'.format(num_epochs))
     try:
         for epoch in range(start_epoch, num_epochs):
