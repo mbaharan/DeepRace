@@ -217,13 +217,11 @@ def main():
     mat = matloader.loadmat(args.filename)
 
     # Dataloader for the test device
-    testset = NASARealTime(args.data_dir,
+    testset = NASADataSet(args.data_dir,
                           args.input_size,
                           args.predict_size,
                           test_idx,
-                          #inference=True,
-                          train=False,
-                          normalize=True)#, error_at5percent=error_at5_percent)
+                          train=False)#, error_at5percent=error_at5_percent)
     testloader = DataLoader(testset, batch_size=1,
                             shuffle=False, drop_last=True)
 
