@@ -1,9 +1,13 @@
-batch_size: 32
+batch_size: 1
+bit: null
+bit_override: ''
+calibrate: null
 data_dir: ./utility/dR11Devs.mat
-decay_epochs: 250
-dropout: 0.1
+decay_epochs: 1000
+dropout: 0.2
 dump_pdf: ''
-epochs: 2000
+epochs: 4000
+fuse_bn: null
 input_size: 21
 ksize: 7
 levels: 3
@@ -15,6 +19,9 @@ nhid: 15
 optim: SGD
 patience: 20
 predict_size: 104
+qe_config_file: null
+quant_aware: ''
+quantize: ''
 resume: ''
 testset: 0
 total_dev: 11
