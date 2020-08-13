@@ -5,20 +5,48 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Online Quantization",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "args": ["--config", "/home/steve/Research_Projects/DeepRace/output/train/08_13_20__1535_TCN_21_104_15_3_Dev_0/args.yaml",
+            "--resume", "/home/steve/Research_Projects/DeepRace/output/train/08_13_20__1535_TCN_21_104_15_3_Dev_0/model_best.pth",
+            "--fuse-bn", "1", "--quantize", "1", "--quant-aware", "1"]
+        },
+        {
             "name": "Inference",
             "type": "python",
             "request": "launch",
             "program": "inference.py",
             "console": "integratedTerminal",
-            "args": ["--config", "/home/steve/DeepRace/output/train/08_04_20__1407_TCN_21_104_15_3_Dev_1/args.yaml",
-                "--rul-time", "77", "83", "90", "95", "101", "107", "114", "117", "119", "122", "123"   ]
+            "args": [
+                "--config",
+                "/home/steve/DeepRace/output/train/08_04_20__1407_TCN_21_104_15_3_Dev_1/args.yaml",
+                "--rul-time",
+                "77",
+                "83",
+                "90",
+                "95",
+                "101",
+                "107",
+                "114",
+                "117",
+                "119",
+                "122",
+                "123"
+            ]
         },
         {
             "name": "Train",
             "type": "python",
             "request": "launch",
             "program": "train.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "args": [
+                "--batch-size",
+                "1"
+            ]
         }
     ]
 }
