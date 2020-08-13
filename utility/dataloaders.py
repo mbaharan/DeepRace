@@ -37,7 +37,7 @@ class NASADataSet(Dataset):
 
     """
 
-    def __init__(self, filename, samples, predict, test_set, train, inference=False, normalize=False, normal_dis=False, total_dev=11, error_at5percent=False):
+    def __init__(self, filename, input_size, predict_size, test_set, train, total_dev=11):
         """
         :param
         :param
@@ -45,95 +45,99 @@ class NASADataSet(Dataset):
         :return:
         """
 
-        if train and error_at5percent:
-            raise Exception("The error at 5% should be only considered for testing mode.")
-
-        idx = range(0, total_dev)
-
-        mat = matloader.loadmat(filename)
-        self.dev_names = mat['devs']
-        training_list = [i for i in idx if i != test_set[0]]
-        self.input_size = samples
-        self.target_size = predict
-        self.normalize = normalize
+        self.idx = range(0, total_dev)
+        self.ptr = np.zeros(total_dev - 1, dtype=int)
+        self.how_many = np.zeros(total_dev - 1, dtype=int)
+        self.mat = matloader.loadmat(filename)
+        self.dev_names = self.mat['devs']
+        training_list = [i for i in self.idx if i != test_set[0]]
+        self.input_size = input_size
+        self.predict_size = predict_size
         self.train = train
-        self.mean = None
-        self.std = None
-        self.normal_dis = normal_dis
-        self.min_arr = float('+inf')
-        self.max_arr = float('-inf')
+        self.mean, self.std = self.normalize()
+        self.error_index = np.zeros(total_dev - 1, dtype=int)
 
         if train:
-            print('-> Processing following devices for training mode:')
             action_set = training_list
-        else:
-            print('-> Processing following devices for test mode:')
-            action_set = test_set
-
-        if self.normalize:
-            _tmp = np.array([])
-            for i in idx:
-                _tmp = np.append(_tmp, mat['vals'][0, i][0])
-
-            self.min_arr = min(_tmp.min(), self.min_arr)
-            self.max_arr = max(_tmp.max(), self.min_arr)
-            self.mean = np.mean(_tmp)
-            self.std = np.std(_tmp)
+            print('-> Processing following devices for training mode: {}'.format(action_set))
             
-        # Set all samples to have the number of time steps by padding 0's
-        #self.dataset = np.empty((len(action_set), timesteps))
-        _dataset = list()  # np.zeros((1, (samples + predict)))
-        for _, val in enumerate(action_set):
-            dev_name = mat['devs'][0, val][0]
+        else:
+            action_set = test_set
+            print('-> Processing following devices for test mode: {}'.format(action_set))
+            
+        _dataset = list()
+        for i, val in enumerate(action_set):
+            dev_name = self.mat['devs'][0, val][0]
 
-            _tmp_len = len(mat['vals'][0, val][0])
-            _tmp_data = mat['vals'][0, val][0]
+            _tmp_data = self.mat['vals'][0, val][0]
+            _tmp_data = (_tmp_data-self.mean)/self.std
 
-            if self.normal_dis:
-                _tmp_data = (_tmp_data-self.mean)/self.std
-            else:
-                _tmp_data = 2*((_tmp_data-self.min_arr) /
-                               (self.max_arr-self.min_arr)) - 1
+            _tmp_len = len(self.mat['vals'][0, val][0])
+            pad = _tmp_len % (input_size + predict_size)
+
+            _tmp_data = np.pad(_tmp_data, (0, pad), 'constant', constant_values=(0, _tmp_data[-1]))
+            _how_many = int(_tmp_len / (input_size + predict_size))
+            self.how_many[i] = _how_many
 
             if train:
                 _dataset.append(np.array(_tmp_data).astype('float32'))
-            else:
+                self.error_index[i] = self.find_index(_tmp_data >= 0.02)
+                if self.error_index[i] == -1:
+                    self.error_index[i] = total_dev_len - 1
                 
-                if not error_at5percent:
-                    _how_many = int(_tmp_len / (samples + predict))
+                self.error_index[i] = self.error_index[i] // (self.predict_size + self.input_size)
+                self.error_index[i] -= 1
+                if self.error_index[i] < 0:
+                    self.error_index[i] = 0
+            else:
+                for j in range(_how_many):
+                    print("-> Processing Device({})-{:3.2f}%".format(val, j*100/_how_many), end='\r')
+                    _one_sample = np.array(_tmp_data[j*(input_size+predict_size):(j+1)*(input_size+predict_size)])
 
-                    # Needed to reach the end of the datasample (if not easily divisible by the input + prediction window)
-                    if inference:
-                        print('+ Inference mode.')
-                        #_how_many += 1
-                    for i in range(_how_many):
-                        print("-> Processing Device({})-{:3.2f}%".format(val,
-                                                                         i*100/_how_many), end='\r')
-                        _one_sample = np.array(
-                            _tmp_data[i*(samples+predict):(i+1)*(samples+predict)])
-                        #_one_sample = np.expand_dims(_one_sample, axis=0)
-                        _dataset.append(_one_sample.astype('float32'))
-                else:
-                    print('ELSE')
-                    _one_sample = np.array(_tmp_data[_tmp_len-(samples+predict):])
                     _dataset.append(_one_sample.astype('float32'))
+             
         self.dataset = _dataset
-        pass
 
-        #self.dataset = torch.from_numpy(np.asarray(tmp).astype(np.float32)).type(torch.float32)
+    def normalize(self):
+        self._tmp = np.array([])
+        for i in self.idx:
+            self._tmp = np.append(self._tmp, self.mat['vals'][0, i][0])
+        mean = np.mean(self._tmp)
+        std = np.std(self._tmp)
+        return mean, std
+
+    def find_index(self, arr):
+        """Find the threshold index, if it exists, and return it.
+        arr is a boolean array comparing each element >= threshold value,
+        where True if it is >=, and False if not"""
+        print('-> Finding threshold index...')
+        # Determine if threshold value exists in current array
+        # any() returns True if any value of the array is True and False otherwise
+        if not arr.any():
+            return -1
+        
+        # Return the FIRST index that is >= the threshold value (True), which is 0.05 as from the NASA paper.
+        return np.argmax(arr)
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
         if self.train:
-            total_data = len(self.dataset[idx])
-            j = np.random.random_integers(total_data)
-            if j + (self.input_size + self.target_size) <= total_data-1:
-                return self.dataset[idx][j:j+self.input_size], self.dataset[idx][j+self.input_size:j+self.input_size + self.target_size]
-            else:
-                return self.dataset[idx][total_data - (self.input_size+self.target_size):total_data - self.target_size], self.dataset[idx][total_data - self.target_size:total_data]
+            if self.ptr[idx] == self.how_many[idx]:
+                self.ptr[idx] = self.error_index[idx]
+            input_start = self.ptr[idx] * (self.input_size + self.predict_size)
+            input_stop = input_start + self.input_size
+            
+            target_start = input_stop
+            target_stop = target_start + self.predict_size
 
+            if idx == len(self.dataset) - 1:
+                self.ptr += 1
+
+
+            return self.dataset[idx][input_start:input_stop], self.dataset[idx][target_start:target_stop]
+            
         else:
             return self.dataset[idx][:self.input_size], self.dataset[idx][self.input_size:]
 
@@ -145,7 +149,7 @@ class NASARealTime(Dataset):
     Generates data samples
     """
 
-    def __init__(self, filename, samples, predict, test_set, train=True, normalize=True, normal_dis=True, total_dev=11):
+    def __init__(self, filename, input_size, predict_size, test_set, train=True, total_dev=11):
         """
         :param
         :param
@@ -153,73 +157,109 @@ class NASARealTime(Dataset):
         :return:
         """
         
-        idx = range(0, total_dev)
+        self.idx = range(0, total_dev)
+        self.ptr = np.zeros(total_dev - 1, dtype=int)
+        self.how_many = np.zeros(total_dev - 1, dtype=int)
+        self.mat = matloader.loadmat(filename)
+        self.dev_names = self.mat['devs']
+        training_list = [i for i in self.idx if i != test_set[0]]
+        self.input_size = input_size
+        self.predict_size = predict_size
 
-        mat = matloader.loadmat(filename)
-        self.dev_names = mat['devs']
-        training_list = [i for i in idx if i != test_set[0]]
-        self.input_size = samples
-        self.target_size = predict
-        self.normalize = normalize
         self.train = train
-        self.mean = None
-        self.std = None
-        self.normal_dis = normal_dis
-        self.min_arr = float('+inf')
-        self.max_arr = float('-inf')
-        self.input = []
-        self.target = []
+        self.mean, self.std = self.normalize()
+
+        # self.input = []
+        # self.target = []
 
         if train:
-            #print('-> Processing following devices for training mode:')
             action_set = training_list
+            print('-> Processing following devices for training mode: {}'.format(action_set))
+            
         else:
-            #print('-> Processing following devices for test mode:')
             action_set = test_set
+            print('-> Processing following devices for test mode: {}'.format(action_set))
 
-        if self.normalize:
-            _tmp = np.array([])
-            for i in idx:
-                _tmp = np.append(_tmp, mat['vals'][0, i][0])
+        _dataset = list()
+        for i, val in enumerate(action_set):
+            dev_name = self.mat['devs'][0, val][0]
 
-            self.min_arr = min(_tmp.min(), self.min_arr)
-            self.max_arr = max(_tmp.max(), self.min_arr)
-            self.mean = np.mean(_tmp)
-            self.std = np.std(_tmp)
+            _tmp_data = self.mat['vals'][0, val][0]
+            _tmp_data = (_tmp_data-self.mean)/self.std
 
-        for i in action_set:
-            ptr = 0
-            sample = mat['vals'][0, i][0]
-            dev_name = mat['devs'][0, i][0]
-            if self.normalize:
-                sample = (sample-self.mean)/self.std
-            stop = len(sample) - self.input_size - self.target_size
+            _tmp_len = len(self.mat['vals'][0, val][0])
+            pad = _tmp_len % (input_size + predict_size)
 
-            for _ in range(stop):
-                input_start = ptr
-                input_end = ptr + self.input_size
-                target_start = input_end
-                target_end = target_start + self.target_size
+            _tmp_data = np.pad(_tmp_data, (0, pad), 'constant', constant_values=(0, _tmp_data[-1]))
+            _how_many = (_tmp_len - (self.input_size + self.predict_size)) + 1
+            self.how_many[i] = _how_many
+            if train:
+                _dataset.append(np.array(_tmp_data).astype('float32'))
+            else:
+                for j in range(_how_many):
+                    print("-> Processing Device({})-{:3.2f}%".format(val, j*100/_how_many), end='\r')
+                    _one_sample = np.array(_tmp_data[j:(j + (self.input_size + self.predict_size))])
 
-                self.input.append(sample[input_start:input_end])
-                self.target.append(sample[target_start:target_end])
-                ptr += 1
+                    _dataset.append(_one_sample.astype('float32'))
+             
+        self.dataset = _dataset
 
-        self.input = np.array(self.input)
-        self.input = torch.from_numpy(self.input)
-        self.input = self.input.type(torch.FloatTensor)
-        #print(self.input.shape)
-        self.target = np.array(self.target)
+        #     for _ in range(_how_many):
+        #         input_start = ptr
+        #         input_end = ptr + self.input_size
+        #         target_start = input_end
+        #         target_end = target_start + self.predict_size
 
-        self.target = torch.from_numpy(self.target)
-        self.target = self.target.type(torch.FloatTensor)
+        #         self.input.append(sample[input_start:input_end])
+        #         self.target.append(sample[target_start:target_end])
+        #         ptr += 1
+
+        # self.input = np.array(self.input)
+        # self.input = torch.from_numpy(self.input)
+        # self.input = self.input.type(torch.FloatTensor)
+        # #print(self.input.shape)
+        # self.target = np.array(self.target)
+
+        # self.target = torch.from_numpy(self.target)
+        # self.target = self.target.type(torch.FloatTensor)
+
+    def normalize(self):
+        self._tmp = np.array([])
+        for i in self.idx:
+            self._tmp = np.append(self._tmp, self.mat['vals'][0, i][0])
+        mean = np.mean(self._tmp)
+        std = np.std(self._tmp)
+        return mean, std
 
     def __len__(self):
-        return len(self.input)
+        return len(self.dataset)
 
     def __getitem__(self, idx):
+        if self.train:
+            if self.ptr[idx] == self.how_many[idx]:
+                self.ptr[idx] = 0
 
-        return self.input[idx], self.target[idx]
+            input_start = self.ptr[idx]
+            input_stop = input_start + self.input_size
+
+            target_start = input_stop
+            target_stop = target_start + self.predict_size
+
+            if idx == len(self.dataset) - 1:
+                self.ptr += 1
+
+            return self.dataset[idx][input_start:input_stop], self.dataset[idx][target_start:target_stop]
+            
+        else:
+            return self.dataset[idx][:self.input_size], self.dataset[idx][self.input_size:]
+
+
+    # def __len__(self):
+    #     return len(self.input)
+
+    # def __getitem__(self, idx):
+
+    #     return self.input[idx], self.target[idx]
 
 
 if __name__ == "__main__":
