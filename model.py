@@ -30,9 +30,9 @@ class TCN(nn.Module):
 
     def forward(self, inputs):
         """Inputs have to have dimension (N, C_in, L_in)"""
-        x = inputs.unsqueeze(1)#.unsqueeze(2)
+        x = inputs.unsqueeze(1).unsqueeze(2)
         x = self.tcn(x)
-        #x = x.squeeze(2)
+        x = x.squeeze(2)
         x = self.linear(x[:, :, -1])
 
         return x
@@ -49,9 +49,9 @@ class TCNFlops(nn.Module):
 
     def forward(self, inputs):
         """Inputs have to have dimension (N, C_in, L_in)"""
-        x = inputs#.unsqueeze(1)
+        x = inputs.unsqueeze(1)
         x = self.tcn(x)  # input should have dimension (N, C, L)
-        #x = x.squeeze(2)
+        x = x.squeeze(2)
         x = self.linear(x[:, :, -1])
 
         return x

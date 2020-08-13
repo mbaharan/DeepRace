@@ -33,34 +33,34 @@ class TemporalBlock(nn.Module):
     def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout):
         super(TemporalBlock, self).__init__()
 
-        # kernel_size = (1, kernel_size)
-        # dilation = (1, dilation)
+        kernel_size = (1, kernel_size)
+        dilation = (1, dilation)
         
-        self.pad1 = nn.ConstantPad1d((0, padding), 0)
+        self.pad1 = nn.ConstantPad2d((0, padding), 0)
 
         self.DSConv1 = nn.Sequential(
-            nn.Conv1d(n_inputs, n_inputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_inputs),
-            nn.BatchNorm1d(n_inputs),
+            nn.Conv2d(n_inputs, n_inputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_inputs),
+            nn.BatchNorm2d(n_inputs),
             nn.ReLU6(),
-            nn.Conv1d(n_inputs, n_outputs, kernel_size=1),
-            nn.BatchNorm1d(n_outputs),
+            nn.Conv2d(n_inputs, n_outputs, kernel_size=1),
+            nn.BatchNorm2d(n_outputs),
             nn.ReLU6()
         )
 
-        self.pad2 = nn.ConstantPad1d((0, padding), 0)
+        self.pad2 = nn.ConstantPad2d((0, padding), 0)
 
         self.DSConv2 = nn.Sequential(
-            nn.Conv1d(n_outputs, n_outputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_outputs),
-            nn.BatchNorm1d(n_outputs),
+            nn.Conv2d(n_outputs, n_outputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_outputs),
+            nn.BatchNorm2d(n_outputs),
             nn.ReLU6(),
-            nn.Conv1d(n_outputs, n_outputs, kernel_size=1),
-            nn.BatchNorm1d(n_outputs),
+            nn.Conv2d(n_outputs, n_outputs, kernel_size=1),
+            nn.BatchNorm2d(n_outputs),
             nn.ReLU6()
         )
 
         self.relu = nn.ReLU6()
 
-        self.downsample = nn.Conv1d(
+        self.downsample = nn.Conv2d(
             n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
 
     def forward(self, x):
