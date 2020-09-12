@@ -6,7 +6,7 @@ import sys
 import os
 import numpy as np
 from utility.helpers import init_xavier
-
+import distiller
 
 """
 Copyright (c) 2020, University of North Carolina at Charlotte All rights reserved.
@@ -35,16 +35,17 @@ class TemporalBlock(nn.Module):
 
         kernel_size = (1, kernel_size)
         dilation = (1, dilation)
-        
         self.pad1 = nn.ConstantPad2d((0, padding), 0)
 
         self.DSConv1 = nn.Sequential(
             nn.Conv2d(n_inputs, n_inputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_inputs),
             nn.BatchNorm2d(n_inputs),
             nn.ReLU6(),
-            nn.Conv2d(n_inputs, n_outputs, kernel_size=1),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(n_inputs, n_outputs, kernel_size=1, stride=stride, padding=0),
             nn.BatchNorm2d(n_outputs),
-            nn.ReLU6()
+            nn.ReLU6(),
+            nn.Dropout(p=dropout)
         )
 
         self.pad2 = nn.ConstantPad2d((0, padding), 0)
@@ -53,11 +54,13 @@ class TemporalBlock(nn.Module):
             nn.Conv2d(n_outputs, n_outputs, kernel_size=kernel_size, stride=stride, padding=0, dilation=dilation, groups=n_outputs),
             nn.BatchNorm2d(n_outputs),
             nn.ReLU6(),
-            nn.Conv2d(n_outputs, n_outputs, kernel_size=1),
+            nn.Dropout(p=dropout),
+            nn.Conv2d(n_outputs, n_outputs, kernel_size=1, stride=stride, padding=0),
             nn.BatchNorm2d(n_outputs),
-            nn.ReLU6()
+            nn.ReLU6(),
+            nn.Dropout(p=dropout)
         )
-
+        self.res_path = distiller.modules.EltwiseAdd(inplace=True)
         self.relu = nn.ReLU6()
 
         self.downsample = nn.Conv2d(
@@ -71,8 +74,9 @@ class TemporalBlock(nn.Module):
         x = self.DSConv1(x)
         x = self.pad2(x)
         x = self.DSConv2(x)
-        x = x + res
-        out = self.relu(x)
+        #x = x + res
+        x = self.res_path(x, res)
+        out = x
 
         return out
 

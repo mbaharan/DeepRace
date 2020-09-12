@@ -1,0 +1,15 @@
+quantizers:
+  linear_quantizer:
+    class: QuantAwareTrainRangeLinearQuantizer
+    bits_activations: 8
+    bits_weights: 8
+    bits_bias: 8
+    mode: ASYMMETRIC_UNSIGNED
+    ema_decay: 0.999
+    per_channel_wts: true
+policies:
+- quantizer:
+    instance_name: linear_quantizer
+  starting_epoch: 0
+  ending_epoch: 10000
+  frequency: 1

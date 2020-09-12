@@ -14,16 +14,18 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from utility.generate_sample import generate_sample
 from utility.dataloaders import NASADataSet, NASARealTime
-from utility.helpers import load_checkpoint
+from utility.helpers import load_checkpoint, load_checkpoint_post, _parse_args
 from model import TCN
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+#from matplotlib.animation import FuncAnimation
 import numpy as np
 import scipy.io as matloader
 import yaml
 from sklearn.metrics import mean_squared_error
 import time
 import os
+# Batch norm fusion
+from pytorch_bn_fusion.bn_fusion_tcn import fuse_bn_sequential
 
 config_parser = parser = argparse.ArgumentParser(
     description='Training Config', add_help=False)
@@ -46,8 +48,11 @@ parser.add_argument('-f', '--filename', default='utility/dR11Devs.mat', type=str
                     help='Path to the dataset')
 parser.add_argument('-t', '--tail', default='', type=str,
                     help='Path to save figure')
-
-
+# Batch-fusion
+parser.add_argument('--fuse-bn',default=None, type=str,
+                    dest='fuse_bn', help='Fuse BN to Conv')
+parser.add_argument('--quantize', default='', type=str, metavar='PATH',
+                    help='Resume and quantize pretrained model')
 """
 Copyright (c) 2020, University of North Carolina at Charlotte All rights reserved.
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -58,29 +63,6 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 Authors: Reza Baharani - Transformative Computer Systems Architecture Research (TeCSAR) at UNC Charlotte
          Steven Furgurson - Transformative Computer Systems Architecture Research (TeCSAR) at UNC Charlotte
 """
-
-
-def _parse_args():
-    """Parse command line argument files (yaml) from previous trainning sessions
-    or within this file itself"""
-
-    # Do we have a config file to parse?
-    args_config, remaining = config_parser.parse_known_args()
-    if args_config.config:
-        with open(args_config.config, 'r') as f:
-            cfg = yaml.safe_load(f)
-            parser.set_defaults(**cfg)
-
-    # Find the output directory and model path 
-    output_dir = args_config.config.split('/')
-    output_dir.pop(-1)
-    output_dir = ('/').join(output_dir)
-    model_path = output_dir + '/model_best.pth'
-    # The main arg parser parses the rest of the args, the usual
-    # defaults will have been overridden if config file specified.
-    args = parser.parse_args(remaining)
-
-    return args, model_path, output_dir
 
 
 def find_index(arr):
@@ -204,11 +186,7 @@ def find_degradation(args, model, mean, std, prediction, error_index, mat, actua
 
 def main():
     # Parse arguments
-    args, model_path, output_dir = _parse_args()
-    
-    # Output DIR for quantization stats
-    quant_stats = '{}/qe_stats/quantization_stats.yaml'.format(output_dir)
-    print("Quant stats @ {}".format(quant_stats))
+    args, output_dir = _parse_args(parser, config_parser)
 
     # Current test device
     test_idx = [args.testset]
@@ -221,6 +199,7 @@ def main():
                           args.input_size,
                           args.predict_size,
                           test_idx,
+                          focus=args.focus,
                           train=False)#, error_at5percent=error_at5_percent)
     testloader = DataLoader(testset, batch_size=1,
                             shuffle=False, drop_last=True)
@@ -245,8 +224,20 @@ def main():
     optimizer = optim.SGD(parameters, lr=args.lr)
     loss_fn = nn.MSELoss()
 
-    # Load pretrained model
-    load_checkpoint(model, model_path)
+    if args.quantize:
+        output_dir = args.quantize_path
+        # Fuse BN layers (step 1a)
+        if args.fuse_bn:
+            print("-> Fusing BN to conv...")
+            #ds.model_transforms.fold_batch_norms(model, dummy_input)
+            model.eval()
+            model = fuse_bn_sequential(model)
+            model.train()
+            print("-> Loading from checkpoint...")
+            same_keys, new_state_dict = load_checkpoint_post(model, '{}/model_best.pth'.format(args.quantize_path))
+    else:
+        output_dir = args.train_path
+        load_checkpoint(model, '{}/model_best.pth'.format(args.train_path))
 
     # Move model to GPU if available
     if torch.cuda.is_available():

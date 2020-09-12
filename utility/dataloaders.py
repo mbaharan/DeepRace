@@ -37,7 +37,7 @@ class NASADataSet(Dataset):
 
     """
 
-    def __init__(self, filename, input_size, predict_size, test_set, train, total_dev=11):
+    def __init__(self, filename, input_size, predict_size, test_set, train, focus, total_dev=11):
         """
         :param
         :param
@@ -56,6 +56,7 @@ class NASADataSet(Dataset):
         self.train = train
         self.mean, self.std = self.normalize()
         self.error_index = np.zeros(total_dev - 1, dtype=int)
+        self.focus = focus
 
         if train:
             action_set = training_list
@@ -125,7 +126,12 @@ class NASADataSet(Dataset):
     def __getitem__(self, idx):
         if self.train:
             if self.ptr[idx] == self.how_many[idx]:
-                self.ptr[idx] = self.error_index[idx]
+                if self.focus:
+                    print('Looping device {} back to {}'.format(idx, self.error_index[idx]))
+                    self.ptr[idx] = self.error_index[idx]
+                else:
+                    print('\nLooping device {} back to 0\n'.format(idx))
+                    self.ptr[idx] = 0
             input_start = self.ptr[idx] * (self.input_size + self.predict_size)
             input_stop = input_start + self.input_size
             
@@ -135,9 +141,8 @@ class NASADataSet(Dataset):
             if idx == len(self.dataset) - 1:
                 self.ptr += 1
 
-
             return self.dataset[idx][input_start:input_stop], self.dataset[idx][target_start:target_stop]
-            
+
         else:
             return self.dataset[idx][:self.input_size], self.dataset[idx][self.input_size:]
 
@@ -149,7 +154,7 @@ class NASARealTime(Dataset):
     Generates data samples
     """
 
-    def __init__(self, filename, input_size, predict_size, test_set, train=True, total_dev=11):
+    def __init__(self, filename, input_size, predict_size, test_set, train=True, focus=None, total_dev=11):
         """
         :param
         :param
@@ -169,8 +174,8 @@ class NASARealTime(Dataset):
         self.train = train
         self.mean, self.std = self.normalize()
 
-        # self.input = []
-        # self.target = []
+        self.input = []
+        self.target = []
 
         if train:
             action_set = training_list
@@ -180,48 +185,31 @@ class NASARealTime(Dataset):
             action_set = test_set
             print('-> Processing following devices for test mode: {}'.format(action_set))
 
-        _dataset = list()
-        for i, val in enumerate(action_set):
-            dev_name = self.mat['devs'][0, val][0]
+        for i in action_set:
+            ptr = 0
+            sample = self.mat['vals'][0, i][0]
+            dev_name = self.mat['devs'][0, i][0]
+  
+            stop = len(sample) - self.input_size - self.predict_size + 1
 
-            _tmp_data = self.mat['vals'][0, val][0]
-            _tmp_data = (_tmp_data-self.mean)/self.std
+            for _ in range(stop):
+                input_start = ptr
+                input_end = ptr + self.input_size
+                target_start = input_end
+                target_end = target_start + self.predict_size
 
-            _tmp_len = len(self.mat['vals'][0, val][0])
-            pad = _tmp_len % (input_size + predict_size)
+                self.input.append(sample[input_start:input_end])
+                self.target.append(sample[target_start:target_end])
+                ptr += 1
 
-            _tmp_data = np.pad(_tmp_data, (0, pad), 'constant', constant_values=(0, _tmp_data[-1]))
-            _how_many = (_tmp_len - (self.input_size + self.predict_size)) + 1
-            self.how_many[i] = _how_many
-            if train:
-                _dataset.append(np.array(_tmp_data).astype('float32'))
-            else:
-                for j in range(_how_many):
-                    print("-> Processing Device({})-{:3.2f}%".format(val, j*100/_how_many), end='\r')
-                    _one_sample = np.array(_tmp_data[j:(j + (self.input_size + self.predict_size))])
+        self.input = np.array(self.input)
+        self.input = torch.from_numpy(self.input)
+        self.input = self.input.type(torch.FloatTensor)
+        #print(self.input.shape)
+        self.target = np.array(self.target)
 
-                    _dataset.append(_one_sample.astype('float32'))
-             
-        self.dataset = _dataset
-
-        #     for _ in range(_how_many):
-        #         input_start = ptr
-        #         input_end = ptr + self.input_size
-        #         target_start = input_end
-        #         target_end = target_start + self.predict_size
-
-        #         self.input.append(sample[input_start:input_end])
-        #         self.target.append(sample[target_start:target_end])
-        #         ptr += 1
-
-        # self.input = np.array(self.input)
-        # self.input = torch.from_numpy(self.input)
-        # self.input = self.input.type(torch.FloatTensor)
-        # #print(self.input.shape)
-        # self.target = np.array(self.target)
-
-        # self.target = torch.from_numpy(self.target)
-        # self.target = self.target.type(torch.FloatTensor)
+        self.target = torch.from_numpy(self.target)
+        self.target = self.target.type(torch.FloatTensor)
 
     def normalize(self):
         self._tmp = np.array([])
@@ -232,26 +220,10 @@ class NASARealTime(Dataset):
         return mean, std
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.input)
 
     def __getitem__(self, idx):
-        if self.train:
-            if self.ptr[idx] == self.how_many[idx]:
-                self.ptr[idx] = 0
-
-            input_start = self.ptr[idx]
-            input_stop = input_start + self.input_size
-
-            target_start = input_stop
-            target_stop = target_start + self.predict_size
-
-            if idx == len(self.dataset) - 1:
-                self.ptr += 1
-
-            return self.dataset[idx][input_start:input_stop], self.dataset[idx][target_start:target_stop]
-            
-        else:
-            return self.dataset[idx][:self.input_size], self.dataset[idx][self.input_size:]
+        return self.input[idx], self.target[idx]
 
 
     # def __len__(self):

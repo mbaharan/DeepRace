@@ -37,6 +37,7 @@ class TCN(nn.Module):
 
         return x
 
+
 '''
 Used to measure the FLOPS of the model, the flop module requires the input to be a certain way while the training requires
 it to be in another arrangement. This is the reason for two separate classes

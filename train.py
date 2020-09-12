@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 import argparse
 import sys
-import time
-from datetime import datetime
+# import time
+# from datetime import datetime
 import math
 import os
 import warnings
@@ -11,25 +11,27 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from model import TCN, TCNFlops
+from model import *
 from ptflops import get_model_complexity_info
 import numpy as np
-
 import scipy.io as matloader
 from os import path
 from collections import OrderedDict
 import yaml
 
+# Utility
+from utility.dataloaders import NASADataSet, NASARealTime
+from utility.helpers import *
+from utility.helpers import _parse_args
+from utility.quantize import Quantize
+
 # Batch norm fusion
-from pytorch_bn_fusion.bn_fusion import fuse_bn_recursively, fuse_bn_sequential
+from pytorch_bn_fusion.bn_fusion_tcn import fuse_bn_sequential
 
 # Distiller Quantization
 import distiller as ds
 from distiller.data_loggers import collector_context
 from distiller import file_config
-from utility.dataloaders import NASADataSet, NASARealTime
-from utility.helpers import resume_checkpoint, load_checkpoint, load_checkpoint_post, AverageMeter, CheckpointSaver, get_outdir, init_xavier
-
 
 warnings.filterwarnings("ignore")   # Suppress the RunTimeWarning on unicode
 
@@ -43,6 +45,7 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('--data-dir', type=str, default='./utility/dR11Devs.mat',
                     help='Path to mat file containing transistor degradation')
+
 parser.add_argument('--epochs', type=int, default=4000,
                  help='upper epoch limit (default: 100)')
 parser.add_argument('--batch-size', type=int, default=32, metavar='N', dest="batch_size",
@@ -59,10 +62,6 @@ parser.add_argument('--levels', type=int, default=3,
                     help='# of levels (default: 4)')
 parser.add_argument('--lr', type=float, default=1,
                     help='initial learning rate (default: 1)')
-parser.add_argument('--min-lr', type=float, default=1e-4, dest='min_lr',
-                    help='The lowest LR that scheduling will set (1e-4)')
-parser.add_argument('--patience', type=int, default=20,
-                    help='How many epochs without progress before LR drops (default: 20)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='Resume full model and optimizer state from checkpoint (default: none)')
 parser.add_argument('--log-interval', type=int, default=100, metavar='N',
@@ -79,29 +78,31 @@ parser.add_argument('--optim', type=str, default='SGD',
                     help='optimizer to use (default: SGD)')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
                     help='SGD momentum (default: 0.9)')
-parser.add_argument('--dump-pdf', type=str, default='', dest="dump_pdf",
-                    help='Save pdf of model architecture')
 parser.add_argument('--total-dev', type=int, default=11, dest='total_dev',
                     help='The number of devices to train against (Default: 11')
+parser.add_argument('--focus', dest='focus', action='store_true')
+parser.add_argument('--no-focus', dest='focus', action='store_false')
+parser.add_argument('--dataset', type=str, default='mosfet',
+                    help='Dataset to train on (mosfet, nlp_char, nlp_word, music')
+
 # Online-quantization
-parser.add_argument('--quantize', default='', type=str, metavar='PATH',
-                    help='Resume and quantize pretrained model')
-parser.add_argument('--quant-aware',default='', type=str, metavar='PATH',
-                    dest='quant_aware', help='Path to quant_aware_linear YAML config file')
-# Set the bit-width
+parser.add_argument('--quantize_path', default='', type=str, metavar='PATH',
+                    help='Resume full model and optimizer state from checkpoint (default: none)')
+parser.add_argument('--quantize', dest='quantize', action='store_true')
+parser.add_argument('--QAT', dest='QAT', action='store_true')
+parser.add_argument('--calibrate', dest='calibrate', action='store_true')
+parser.add_argument('--post-training', dest='post_training', action='store_true')
+
+# # Set the bit-width
 parser.add_argument('--bit',default=None, type=int,
                      help='Bit width to quantize to')
 parser.add_argument('--bit-override',default='', type=str, dest='bit_override',
                      help='Override first layer with 8 bit')
 # Batch-fusion
-parser.add_argument('--fuse-bn',default=None, type=str,
-                    dest='fuse_bn', help='Fuse BN to Conv')
-# Post-training range-based linear quantization
-# Generate calibration file (first step) to calculate min/max values
-parser.add_argument('--calibrate',default=None, type=str, metavar='PATH',
-                    help='Path to quant_aware_linear YAML config file')
-# Perform range-based linear quantization
-parser.add_argument('--quant-post', default=None, type=str,
+parser.add_argument('--fuse-bn', dest='fuse_bn', action='store_true')
+
+# # Perform range-based linear quantization
+parser.add_argument('--qe-config', default=None, type=str,
                     dest='qe_config_file', help='Path to quant_post_linear YAML config file')
 
 """
@@ -124,69 +125,13 @@ Inspired by
 
 """
 
-def _parse_args():
-    """Parse command line argument files (yaml) from previous trainning sessions
-    or within this file itself"""
-
-    # Do we have a config file to parse?
-    args_config, remaining = config_parser.parse_known_args()
-    if args_config.config:
-        with open(args_config.config, 'r') as f:
-            cfg = yaml.safe_load(f)
-            parser.set_defaults(**cfg)
-
-    # Find the output directory and model path 
-    output_dir = args_config.config.split('/')
-    output_dir.pop(-1)
-    output_dir = ('/').join(output_dir)
-    model_path = output_dir + '/model_best.pth'
-    # The main arg parser parses the rest of the args, the usual
-    # defaults will have been overridden if config file specified.
-    args = parser.parse_args(remaining)
-
-    return args, model_path, output_dir
-
-# Parse arguments
-args, model_path, output_dir = _parse_args()
-
-args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
-
-# Load in the MatLab file containing the device samples
-filename = args.data_dir
-
-
-"""Quantization steps:
-    1. Train as normal (32FP) with nn.ReLU6 (no nn.ReLU) and HardSigmoid (no normal sigmoid). DO NOT FUSE BN
-    ** Recommend batch size around 128 **
-        -> This outputs a 32FP model.
-        
-    2. Online quantization with quant_aware_linear.yaml (N is the bit width resolution i.e. 4 or 8. It can be any number):
-    (--load <path/to/32FP_model.pth> | --quant-aware 1 | --bit N | --fuse-bn 1 (this fuses batch norm and conv together))
-    **I recommend setting the --warmup-epoch to zero and the learning rate (--lr) to 1e-4 or lower and the --decay-epoch to 5ish**
-        -> This outputs a 32FP model that has been fine-tuned using a FakeQuantizationLayer with fused layers
-    3. Calibrate the min/max values per layer (N is the bit width resolution i.e. 4 or 8. It can be any number):
-    (--load <path/to/quantized_model_DIR/quantized_model.pth> | --calibrate 1 | --bit N | --fuse-bn 1)
-    **You can set a much much higher batch size since the model will be in evaluation mode**
-        -> This outputs quantization statics to <path/to/quantized_model_DIR
-    4. Post training quantization using the tuned model and the calibration statics yaml file. Copy the absolute path of the calibration
-    yaml file and add it to the 'model_activation_stats:' line in the quant_post_linear.yaml file.
-        (--load <path/to/quantized_model_DIR/quantized_model.pth> | --quant-post <path/to/quant_post_linear.yaml> | --fuse-bn 1)
-    **You can set a much much higher batch size since the model will be in evaluation mode**
-        -> This outputs a new model in the <path/to/quantized_model_DIR/>
-"""
-
-
-
 
 def main():
-    compression_scheduler = None
-    # Output DIR for quantization stats
-    qe_dir = args.resume.split('/')
-    qe_dir.pop(-1)
-    qe_dir = '/'.join(qe_dir)
-    quant_stats = '{}/qe_stats/quantization_stats.yaml'.format(qe_dir)
-    print("Quant stats @ {}".format(quant_stats))
+    # Parse arguments
+    args, output_dir = _parse_args(parser, config_parser)
 
+    # Load in the MatLab file containing the device samples
+    filename = args.data_dir
 
     channel_sizes = [args.nhid] * args.levels
     kernel_size = args.ksize
@@ -221,130 +166,6 @@ def main():
     if torch.cuda.is_available():
         print('-> Using CUDA!')
         model.cuda()
-        
-    # Optionally resume from checkpoint
-    resume_state = {}
-    resume_epoch = None
-
-    if args.quantize:
-        if args.bit == 4:
-            if args.quant_aware or args.calibrate:
-                # For online quantization (Step 1)
-                quantization_aware_yaml = './quantization_configs/quant_aware_linear_4bit.yaml'
-                print('-> Loading quantization aware (4-bit): {}'.format(quantization_aware_yaml))
-            elif args.qe_config_file:
-                # For post training quantization (Step 4?)
-                quantization_post_yaml = './quantization_configs/quant_post_linear_4bit.yaml'
-                args.qe_config_file = quantization_post_yaml
-                with open(quantization_post_yaml) as f:
-                    list_doc = yaml.load(f)
-                    list_doc['quantizers']['linear_quantizer']['model_activation_stats'] = quant_stats
-                    with open(quantization_post_yaml, 'w') as f:
-                        yaml.dump(list_doc, f, default_flow_style=False)
-                print('-> Pointing post quantization YAMl to: {}'.format(quant_stats))
-
-        if args.bit == 8:
-            if args.quant_aware or args.calibrate:
-                # For online quantization (Step 1)
-                quantization_aware_yaml = './quantization_configs/quant_aware_linear_8bit.yaml'
-                print('-> Loading quantization aware (8-bit): {}'.format(quantization_aware_yaml))
-            elif args.qe_config_file:
-                # For post training quantization (Step 4)
-                quantization_post_yaml = './quantization_configs/quant_post_linear_8bit.yaml'
-                args.qe_config_file = quantization_post_yaml
-                print('-> Loading post quantization (8bit): {}'.format(quantization_post_yaml))
-                with open(quantization_post_yaml) as f:
-                    list_doc = yaml.safe_load(f)
-                    list_doc['quantizers']['linear_quantizer']['model_activation_stats'] = quant_stats
-                    with open(quantization_post_yaml, 'w') as f:
-                        yaml.dump(list_doc, f, default_flow_style=False)
-                print('-> Pointing post quantization YAMl to: {}'.format(quant_stats))
-
-        if args.resume and not args.quant_aware and not args.calibrate:
-            if args.fuse_bn:
-                print("-> Fusing BN to conv...")
-                model = fuse_bn_recursively(model)
-
-                print("-> Preparing model for quantization-aware training...")
-                compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
-
-                print("-> Resuming from checkpoint for Online Quantization...")
-                load_checkpoint(model, args.resume)
-
-        if args.quant_aware and not args.qe_config_file and not args.calibrate:
-            print("-> Loading from checkpoint for Online Quantization...")
-            load_checkpoint(model, args.resume)
-
-            # Fuse BN layers (step 1a)
-            if args.fuse_bn:
-                print("-> Fusing BN to conv...")
-                model = fuse_bn_recursively(model)
-            # Quantization-aware training (step 2)
-
-            print("-> Preparing model for quantization-aware training...")
-            compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
-
-        if args.resume and args.calibrate:
-            print("-> Preparing model for calibration...")
-            
-            if args.batch_size <= 128:
-                print("**-> You can set your batch size higher if able (currently: {}), model will be in eval()<-**".format(args.batch_size))
-
-            if args.fuse_bn:
-                print("-> Fusing BN to conv...")
-                model = fuse_bn_recursively(model)
-                
-            print("-> Compression...")
-            compression_scheduler = file_config(model, optimizer, quantization_aware_yaml, None)
-
-            print("-> Loading checkpoint...")
-            load_checkpoint(model, args.resume)
-
-        
-        if args.resume and args.qe_config_file:
-            print("-> Post training range-based quantization...")
-
-            if args.fuse_bn:
-                print("-> Fusing BN to conv...")
-                model = fuse_bn_recursively(model)
-
-
-
-            print("-> Loading from checkpoint...")
-            same_keys, new_state_dict = load_checkpoint_post(model, args.load)
-
-            base_bone = OrderedDict()
-            for key in same_keys:
-                base_bone[key] = new_state_dict[key]
-            
-            print("-> Loading new state dictionary...")
-            model.load_state_dict(base_bone)
-
-            
-
-            print("-> Preparing quantizer")
-            quantizer = ds.quantization.PostTrainLinearQuantizer.from_args(model, args)
-            print("-> Dummy input")
-            dummy_input = torch.rand((1, 3, args.img_size, args.img_size)).cuda()
-            
-            quantizer.prepare_model(dummy_input)
-
-    elif resume_state:
-        resume_state, resume_epoch = resume_checkpoint(model, args.resume)
-        if 'optimizer' in resume_state:
-            print('Restoring Optimizer state from checkpoint')
-            optimizer.load_state_dict(resume_state['optimizer'])
-        del resume_state
-
-    start_epoch = 0
-    if resume_epoch is not None:
-        start_epoch = resume_epoch
-
-    if torch.cuda.is_available():
-        print('-> Using CUDA!')
-        model.cuda()
-
-  
 
     # The index of the test sample
     test_idx = [args.testset]
@@ -355,6 +176,7 @@ def main():
                              args.predict_size,
                              test_idx,
                              train=True,
+                             focus=args.focus,
                              total_dev=args.total_dev)
     trainloader = DataLoader(trainset, num_workers=0,
                              batch_size=args.batch_size, shuffle=False)
@@ -364,6 +186,7 @@ def main():
                             args.predict_size,
                             test_idx,
                             train=False,
+                            focus=args.focus,
                             total_dev=args.total_dev)
     testloader = DataLoader(testset, num_workers=0,
                             batch_size=args.batch_size, shuffle=False)
@@ -371,89 +194,93 @@ def main():
     best_metric = None
     best_epoch = None
 
+  # Optionally resume from checkpoint
+    resume_state = {}
+    resume_epoch = None
 
-    if args.calibrate:
-        ds.utils.assign_layer_fq_names(model)
-        print("=> Generating quantization calibration stats based on {0} users".format(args.calibrate))
-        collector = ds.data_loggers.QuantCalibrationStatsCollector(model)
+    if args.quantize:
+        quantize = Quantize(args, model, optimizer, testloader, loss_fn)
+        args, model, compression_scheduler = quantize._args, quantize._model, quantize._compression_scheduler
+
+        if args.calibrate or args.post_training:
+            return
+
+    set_inference(args, output_dir)
+    # elif resume_state:
+    #     resume_state, resume_epoch = resume_checkpoint(model, args.resume)
+    #     if 'optimizer' in resume_state:
+    #         print('Restoring Optimizer state from checkpoint')
+    #         optimizer.load_state_dict(resume_state['optimizer'])
+    #     del resume_state
+
+    start_epoch = 0
+    if resume_epoch is not None:
+        start_epoch = resume_epoch
+
+    if torch.cuda.is_available():
+        print('-> Using CUDA!')
+        model.cuda()
+
+    # if args.calibrate:
+    #     ds.utils.assign_layer_fq_names(model)
+    #     print("=> Generating quantization calibration stats based on {0} users".format(args.calibrate))
+    #     collector = ds.data_loggers.QuantCalibrationStatsCollector(model)
         
-        print("=> Validating...")
-        with collector_context(collector):
-            validate(model, testloader, loss_fn)
+    #     print("=> Validating...")
+    #     with collector_context(collector):
+    #         validate(model, testloader, loss_fn)
 
 
-        qe_path = os.path.join(qe_dir, 'qe_stats')
-        if not os.path.isdir(qe_path):
-            os.mkdir(qe_path)
-        yaml_path = os.path.join(qe_path, 'quantization_stats.yaml')
-        collector.save(yaml_path)
-        print("Quantization statics is saved at {}".format(yaml_path))
-        return
+    #     qe_path = os.path.join(qe_dir, 'qe_stats')
+    #     if not os.path.isdir(qe_path):
+    #         os.mkdir(qe_path)
+    #     yaml_path = os.path.join(qe_path, 'quantization_stats.yaml')
+    #     collector.save(yaml_path)
+    #     print("Quantization statics is saved at {}".format(yaml_path))
+    #     return
 
-    if args.qe_config_file is not None:
-        print("-> validating post quant...")
-        validate(model, testloader, loss_fn)
-        qe_path = os.path.join(qe_dir, 'post_model')
-        if not os.path.isdir(qe_path):
-            os.mkdir(qe_path)
-        model_path = os.path.join(qe_path, 'model.pth')
-        torch.save(model.state_dict(), model_path)
-        print("Post quantized model is saved at {}".format(model_path))
-        return
+    # if args.qe_config_file is not None:
+    #     print("-> validating post quant...")
+    #     validate(model, testloader, loss_fn)
+    #     qe_path = os.path.join(qe_dir, 'post_model')
+    #     if not os.path.isdir(qe_path):
+    #         os.mkdir(qe_path)
+    #     args.resume = os.path.join(qe_path, 'model.pth')
+    #     torch.save(model.state_dict(), args.resume)
+    #     print("Post quantized model is saved at {}".format(args.resume))
+    #     return
 
 
     print(model)
 
-    # The directory where the model will be saved
-    output_base = './output'
-    exp_name = '_'.join([
-        datetime.now().strftime("%m_%d_%y__%H%M"),
-        "TCN",
-        str(args.input_size),
-        str(args.predict_size),
-        str(args.nhid),
-        str(args.levels),
-        "Dev",
-        str(args.testset)
-    ])
-    output_dir = get_outdir(output_base, 'train', exp_name)
-
     saver = CheckpointSaver(checkpoint_dir=output_dir, decreasing=True)
+
+    args_text = yaml.safe_dump(args.__dict__, default_flow_style=False)
     with open(os.path.join(output_dir, 'args.yaml'), 'w') as f:
         f.write(args_text)
     num_epochs = args.epochs
-    min_lr = args.min_lr
-    patience = args.patience
     check_epoch = None
     counter = 0
     lr = optimizer.param_groups[0]['lr']
 
-    if args.testset == 0:
-        with open ('scripts/inference.sh', 'w') as rsh:
-            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 77 83 90 95 101 107 114 117 119 122 123".format(output_dir+'/args.yaml'))
-
-    if args.testset == 1:
-            with open ('scripts/inference.sh', 'w') as rsh:
-                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 119 128 138 147 156 164 175 180 184 188 193 194".format(output_dir+'/args.yaml'))
-
-    if args.testset == 4:
-            with open ('scripts/inference.sh', 'w') as rsh:
-                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 89 95 100 106 113 116 119 121 124 126 133".format(output_dir+'/args.yaml'))
-
-    if args.testset == 9:
-            with open ('scripts/inference.sh', 'w') as rsh:
-                rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 130 139 151 161 170 175 180 185 189".format(output_dir+'/args.yaml'))
 
     print('Scheduled epochs: {}'.format(num_epochs))
     try:
         for epoch in range(start_epoch, num_epochs):
+            
+            if args.QAT:
+                compression_scheduler.on_epoch_begin(epoch)
+            else:
+                compression_scheduler = None
 
-            train_epoch(epoch, model, trainloader, optimizer,
+            train_epoch(epoch, model, trainloader, optimizer, compression_scheduler,
                         loss_fn, args, saver=saver, output_dir=output_dir)
 
-            if (epoch % args.val_interval == 0):
-                print()
-                eval_metrics = validate(model, testloader, loss_fn)
+            print()
+            eval_metrics = validate(model, testloader, loss_fn)
+        
+            if args.QAT:
+                compression_scheduler.on_epoch_end(epoch)
 
             if (saver is not None):
                 last_test_loss = save_metric = eval_metrics['loss']
@@ -466,6 +293,7 @@ def main():
                 else:
                     counter = 0
                 check_epoch = best_epoch
+
 
                 # No progress has been made in 'patience' number of epochs
                 if (epoch % args.decay_epochs == 0) and epoch != 0:
@@ -504,7 +332,7 @@ def main():
                 yaml.safe_dump(stats, file)
 
 
-def train_epoch(epoch, model, loader, optimizer, loss_fn, args, saver=None, output_dir=''):
+def train_epoch(epoch, model, loader, optimizer, compression_scheduler, loss_fn, args, saver=None, output_dir=''):
     """Train the network"""
     model.train()
 
@@ -512,22 +340,34 @@ def train_epoch(epoch, model, loader, optimizer, loss_fn, args, saver=None, outp
 
     # Used by the compression_scheduler
     last_idx = len(loader) - 1
+    total_samples = len(loader.sampler)
+    batch_size = args.batch_size
+    steps_per_epoch = math.ceil(total_samples / batch_size)
 
     for batch_idx, (input, target) in enumerate(loader):
         last_batch = batch_idx == last_idx
         if torch.cuda.is_available():
             input, target = input.cuda(), target.cuda()
+        optimizer.zero_grad()
+        # Quantization
+        if args.QAT:
+            compression_scheduler.on_minibatch_begin(epoch, batch_idx, steps_per_epoch, optimizer)
 
         output = model(input)
 
         loss = loss_fn(output, target)
         losses_m.update(loss.item(), input.size(0))
-
-        optimizer.zero_grad()
         
+        if args.QAT:
+            compression_scheduler.before_backward_pass(epoch, batch_idx, steps_per_epoch, loss, optimizer=optimizer, return_loss_components=True)
         loss.backward()
 
+        if args.QAT:
+            compression_scheduler.before_parameter_optimization(epoch, batch_idx, steps_per_epoch, optimizer)
         optimizer.step()
+
+        if args.QAT:
+            compression_scheduler.on_minibatch_end(epoch, batch_idx, steps_per_epoch, optimizer)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()

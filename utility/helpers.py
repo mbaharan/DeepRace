@@ -5,6 +5,11 @@ import os
 from collections import OrderedDict
 import glob
 import shutil
+import argparse
+import time
+from datetime import datetime
+import yaml
+from model import *
 
 def unwrap_model(model):
     return model.module if hasattr(model, 'module') else model
@@ -243,3 +248,69 @@ def init_xavier(m):
         nn.init.xavier_uniform_(m.weight.data)
     elif type(m) == nn.Linear:
         nn.init.xavier_uniform_(m.weight.data)
+
+def set_inference(args, output_dir):
+    if args.focus:
+        inference_path = 'scripts/inference1.sh'
+    else:
+        inference_path = 'scripts/inference2.sh'
+
+    print('Setting inference path to: {}'.format(inference_path))
+
+    
+    if args.testset == 0:
+        with open (inference_path, 'w') as rsh:
+            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 77 83 90 95 101 107 114 117 119 122 123".format(output_dir +'/args.yaml'))
+
+    if args.testset == 1:
+        with open (inference_path, 'w') as rsh:
+            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 119 128 138 147 156 164 175 180 184 188 193 194".format(output_dir +'/args.yaml'))
+
+    if args.testset == 4:
+        with open (inference_path, 'w') as rsh:
+            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 89 95 100 106 113 116 119 121 124 126 133".format(output_dir +'/args.yaml'))
+
+    if args.testset == 9:
+        with open (inference_path, 'w') as rsh:
+            rsh.write("#! /bin/bash\npython3 inference.py --config {} --rul-time 130 139 151 161 170 175 180 185 189".format(output_dir +'/args.yaml'))
+
+
+def _parse_args(parser, config_parser):
+    """Parse command line argument files (yaml) from previous trainning sessions
+    or within this file itself"""
+
+    # Do we have a config file to parse?
+    args_config, remaining = config_parser.parse_known_args()
+
+    if args_config.config:
+        with open(args_config.config, 'r') as f:
+            cfg = yaml.safe_load(f)
+            parser.set_defaults(**cfg)
+    args = parser.parse_args(remaining)
+
+    output_base = './output'
+    exp_name = '_'.join([
+    datetime.now().strftime("%m_%d_%y__%H%M%S"),
+    "TCN",
+    str(args.input_size),
+    str(args.predict_size),
+    str(args.nhid),
+    str(args.levels),
+    "Dev",
+    str(args.testset),
+    str(args.focus)])
+
+    if not args_config.config:
+        output_dir = get_outdir(output_base, 'train', exp_name)
+        args.train_path = output_dir
+
+    if args.quantize:
+        if args.quantize_path:
+            output_dir = os.path.join(output_base, 'train', exp_name)
+        else:
+            output_dir = get_outdir(output_base, 'train', exp_name)
+            args.quantize_path = '{}/{}'.format(os.getcwd(), output_dir)
+    else:
+        output_dir = os.path.join(output_base, 'train', exp_name)
+
+    return args, output_dir

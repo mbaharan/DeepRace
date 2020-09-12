@@ -1,0 +1,14 @@
+- Model Size:
+  - 2932
+- FLOPS:
+  - 30414.0
+- NHID:
+  - 15
+- levels:
+  - 2
+- ksize:
+  - 5
+- testset:
+  - 0
+- Loss:
+  - 0.0033543718283075884
